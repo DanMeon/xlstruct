@@ -1,0 +1,39 @@
+# * Environment
+.env
+scripts/.env
+**/prd
+
+# * Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+data/
+results/
+generated/
+*.json
+
+# * IDE
+.idea/
+.vscode/
+*.swp
+
+# * Testing
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/fixtures/data/
+
+# * Local scripts (project-specific, not for public repo)
+scripts/
+
+# * Project instructions (not for public repo)
+CLAUDE.md
+
+# * MAC OS
+.DS_Store
+
+# * MCP
+.serena/

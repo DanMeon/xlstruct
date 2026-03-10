@@ -1,0 +1,36 @@
+services:
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9100:9000"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    ports:
+      - "10000:10000"
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "10000"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  fake-gcs:
+    image: fsouza/fake-gcs-server:latest
+    ports:
+      - "4443:4443"
+    command: ["-scheme", "http", "-port", "4443"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4443/storage/v1/b"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
