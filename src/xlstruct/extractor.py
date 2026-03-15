@@ -234,12 +234,11 @@ class Extractor:
         sheet: str | None = None,
         instructions: str | None = None,
         **storage_options: Any,
-    ) -> str:
+    ) -> type[BaseModel]:
         """Analyze an Excel file and suggest a Pydantic schema.
 
-        Returns Python source code defining a Pydantic model that matches
-        the spreadsheet structure. Useful for exploration before defining
-        your own schema.
+        Returns a dynamically created Pydantic model class that matches
+        the spreadsheet structure. Can be passed directly to ``extract()``.
 
         Args:
             source: File path or URL.
@@ -248,8 +247,10 @@ class Extractor:
             **storage_options: Backend-specific storage options.
 
         Returns:
-            Python source code string with a Pydantic model definition.
+            A Pydantic model class built via ``pydantic.create_model()``.
         """
+        from pydantic import Field, create_model
+
         workbook = await self._load_workbook(source, sheet_name=sheet, **storage_options)
         target_sheet = workbook.sheets[0]
 
@@ -261,15 +262,13 @@ class Extractor:
             hint = f"\nAdditional context: {instructions}\n"
 
         prompt = (
-            "Analyze the following spreadsheet data and generate a Pydantic V2 model "
-            "that best captures its structure.\n\n"
+            "Analyze the following spreadsheet data and suggest a Pydantic model.\n\n"
             "Rules:\n"
-            "- Use `from pydantic import BaseModel, Field`\n"
-            "- Add `Field(description=...)` for each field mapping it to the Excel column\n"
-            "- Use appropriate Python types (str, int, float, date, bool, etc.)\n"
-            "- Use `T | None` for nullable fields (not Optional[T])\n"
-            "- Name fields in snake_case, class in PascalCase\n"
-            "- Include ONLY the model definition code, no imports or explanations\n"
+            "- Return a JSON array of field definitions\n"
+            "- Each field: {name (snake_case), type, nullable, description}\n"
+            "- type must be one of: str, int, float, bool, date, datetime\n"
+            "- description should mention the original Excel column name\n"
+            "- model_name: PascalCase name for the model\n"
             f"{hint}\n"
             f"Spreadsheet data:\n{encoded}"
         )
@@ -278,6 +277,7 @@ class Extractor:
 
         from xlstruct.config import apply_cache_control, get_provider_kwargs
         from xlstruct.prompts.system import SYSTEM_PROMPT
+        from xlstruct.schemas.suggest import SuggestedFields
 
         kwargs = get_provider_kwargs(self._config)
         if self._config.api_key:
@@ -289,10 +289,6 @@ class Extractor:
             **kwargs,
         )
 
-        class SchemaCode(BaseModel):
-            code: str
-            explanation: str
-
         messages = apply_cache_control(
             [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -301,19 +297,40 @@ class Extractor:
             self._config.provider,
         )
         result, completion = await client.create_with_completion(
-            response_model=SchemaCode,
+            response_model=SuggestedFields,
             messages=messages,  # type: ignore[arg-type]
             temperature=0.0,
         )
         if self._tracker:
             self._tracker.record("suggest_schema", completion)
-        return f"from pydantic import BaseModel, Field\n\n\n{result.code}"
+
+        # * Build dynamic Pydantic model via create_model()
+        type_map: dict[str, type] = {
+            "str": str,
+            "int": int,
+            "float": float,
+            "bool": bool,
+            "date": __import__("datetime").date,
+            "datetime": __import__("datetime").datetime,
+        }
+
+        field_definitions: dict[str, Any] = {}
+        for f in result.fields:
+            python_type = type_map.get(f.type, str)
+            if f.nullable:
+                python_type = python_type | None  # type: ignore[assignment]
+            field_definitions[f.name] = (
+                python_type,
+                Field(description=f.description),
+            )
+
+        return create_model(result.model_name, **field_definitions)
 
     def suggest_schema_sync(
         self,
         source: str,
         **kwargs: Any,
-    ) -> str:
+    ) -> type[BaseModel]:
         """Synchronous wrapper for suggest_schema(). Jupyter-compatible."""
         return _run_sync(self.suggest_schema(source, **kwargs))  # type: ignore[no-any-return]
 
