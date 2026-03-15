@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/DanMeon/xlstruct/main/assets/banner.svg" alt="XLStruct Banner" width="800"/>
+</p>
+
 # XLStruct
 
 [![CI](https://github.com/DanMeon/xlstruct/actions/workflows/ci.yml/badge.svg)](https://github.com/DanMeon/xlstruct/actions/workflows/ci.yml)
@@ -112,13 +116,18 @@ results = extractor.extract_sync("invoice.xlsx", extraction_config=config)
 Don't know the spreadsheet structure? Let the LLM suggest a schema:
 
 ```python
-code = extractor.suggest_schema_sync("unknown_data.xlsx")
-print(code)  # Prints a Pydantic model definition
+Schema = extractor.suggest_schema_sync("unknown_data.xlsx")
+
+# Inspect the generated model
+print(Schema.model_json_schema())
+
+# Use it directly with extract
+results = extractor.extract_sync("unknown_data.xlsx", schema=Schema)
 ```
 
 ```python
 # With hints
-code = extractor.suggest_schema_sync(
+Schema = extractor.suggest_schema_sync(
     "report.xlsx",
     sheet="Q1 Sales",
     instructions="Focus on financial columns only",
@@ -132,12 +141,13 @@ Every extraction returns token usage details:
 ```python
 results = extractor.extract_sync("invoice.xlsx", schema=InvoiceItem)
 
-print(results.usage.llm_calls)        # Number of LLM API calls
-print(results.usage.input_tokens)     # Total input tokens
-print(results.usage.output_tokens)    # Total output tokens
-print(results.usage.total_tokens)     # Sum
-print(results.usage.cache_read_tokens)  # Prompt cache hits (Anthropic + OpenAI)
-print(results.usage.breakdown)        # Per-call breakdown: [(label, in, out), ...]
+print(results.usage.llm_calls)             # Number of LLM API calls
+print(results.usage.input_tokens)          # Total input tokens
+print(results.usage.output_tokens)         # Total output tokens
+print(results.usage.total_tokens)          # Sum
+print(results.usage.cache_creation_tokens) # Tokens written to prompt cache (Anthropic)
+print(results.usage.cache_read_tokens)     # Prompt cache hits (Anthropic + OpenAI)
+print(results.usage.breakdown)             # Per-call breakdown: [(label, in, out), ...]
 ```
 
 ### CSV Support
@@ -221,8 +231,11 @@ xlstruct extract invoice.xlsx --schema myapp.models:InvoiceItem
 xlstruct extract report.xlsx \
   --schema myapp.models:SalesRecord \
   --provider anthropic/claude-sonnet-4-6 \
+  --mode codegen \
   --sheet "Q1 Sales" \
   --instructions "Ignore summary rows" \
+  --temperature 0.0 \
+  --max-retries 3 \
   --output results.json
 ```
 
@@ -237,9 +250,13 @@ xlstruct extract report.xlsx \
 | `max_retries` | `3` | LLM API retry count |
 | `token_budget` | `100_000` | Max tokens per sheet |
 | `temperature` | `0.0` | LLM temperature |
+| `max_tokens` | `8192` | Max tokens for LLM generation |
+| `thinking` | `False` | Enable Anthropic extended thinking mode (forces temperature=1) |
 | `max_codegen_retries` | `3` | Self-correction attempts for code generation |
 | `codegen_timeout` | `60` | Script execution timeout in seconds |
 | `export_dir` | `None` | Directory to auto-save generated codegen scripts |
+| `provider_options` | `{}` | Provider-specific kwargs passed to `instructor.from_provider()` |
+| `storage_options` | `{}` | Storage backend options (S3 credentials, Azure keys, etc.) |
 
 ```python
 from xlstruct import ExtractorConfig
@@ -257,7 +274,7 @@ extractor = Extractor(config=config)
 For OS-level sandboxing, pass a `DockerBackend` via `execution_backend`:
 
 ```bash
-pip install xlstruct[docker]
+pip install "xlstruct[docker]"
 ```
 
 ```python
@@ -274,7 +291,49 @@ extractor = Extractor(
 ## Architecture
 
 ```
-Storage (fsspec) → Reader (HybridReader / CsvReader) → CompressedEncoder → LLM Engine → Pydantic
+Direct:  Storage (fsspec) → Reader → CompressedEncoder → ExtractionEngine (Instructor) → ExtractionResult[T]
+Codegen: Storage (fsspec) → Reader → CodegenOrchestrator → [Header Detection → Analyzer → Parser → Transformer] → GeneratedScript
+```
+
+### Module layout
+
+```
+src/xlstruct/
+├── extractor.py          # Public API — Extractor class orchestrates everything
+├── config.py             # ExtractorConfig, ExtractionConfig, ExtractionMode
+├── storage.py            # fsspec-based file reading (local, s3://, az://, gs://)
+├── exceptions.py         # Exception hierarchy
+├── cli.py                # Typer CLI (xlstruct extract ...)
+├── _tokens.py            # tiktoken token counting
+├── reader/
+│   ├── base.py           # SheetReader protocol
+│   ├── hybrid_reader.py  # HybridReader (calamine + openpyxl)
+│   └── csv_reader.py     # CsvReader (stdlib csv)
+├── encoder/
+│   ├── base.py           # SheetEncoder protocol
+│   ├── compressed.py     # CompressedEncoder (sample-based)
+│   └── _formatting.py    # Shared formatting helpers
+├── extraction/
+│   ├── engine.py         # ExtractionEngine (instructor.from_provider wrapper)
+│   └── chunking.py       # ChunkSplitter for large sheets
+├── codegen/
+│   ├── orchestrator.py   # CodegenOrchestrator (multi-phase pipeline)
+│   ├── engine.py         # CodegenEngine (LLM calls for codegen)
+│   ├── executor.py       # Security scanning (AST-based import/builtin checks)
+│   ├── validation.py     # ScriptValidator
+│   ├── schema_utils.py   # Pydantic schema → source code utilities
+│   └── backends/
+│       ├── base.py       # ExecutionBackend protocol
+│       ├── subprocess.py # SubprocessBackend (default sandbox)
+│       └── docker.py     # DockerBackend (OS-level isolation)
+├── schemas/
+│   ├── core.py           # SheetData, WorkbookData, CellData
+│   ├── codegen.py        # GeneratedScript, MappingPlan, CodegenAttempt
+│   └── usage.py          # TokenUsage, UsageTracker
+└── prompts/
+    ├── system.py         # Shared system prompts
+    ├── extraction.py     # Direct extraction prompts
+    └── codegen.py        # Codegen phase prompts (analyzer, parser, transformer)
 ```
 
 ### Reader
@@ -290,6 +349,14 @@ Storage (fsspec) → Reader (HybridReader / CsvReader) → CompressedEncoder →
 `CompressedEncoder` converts sheet data to markdown tables with structural metadata:
 - Column types, formula patterns, merged regions
 - Optional head+tail sampling for large sheets (20 rows by default)
+
+### Sandboxed Execution
+
+Generated scripts run in `SubprocessBackend` (or optionally `DockerBackend`) with security layers:
+- **Allowlist imports** — only safe modules (openpyxl, pydantic, stdlib math/data) permitted via AST scanning
+- **Blocked builtins** — `exec`, `eval`, `__import__`, `open`, etc. rejected before execution
+- **Stripped credentials** — API keys and cloud credentials removed from subprocess environment
+- **Timeout** — enforced via `codegen_timeout` config
 
 ### Exceptions
 
