@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, SecretStr
 
 from xlstruct.codegen.backends.base import ExecutionBackend
+from xlstruct.codegen.cache import ScriptCache, compute_structure_signature
 from xlstruct.codegen.orchestrator import CodegenOrchestrator
 from xlstruct.config import SAMPLE_ROWS, ExtractionConfig, ExtractionMode, ExtractorConfig
 from xlstruct.encoder.compressed import CompressedEncoder
@@ -99,6 +100,9 @@ class Extractor:
         self._engine = ExtractionEngine(self._config, tracker=self._tracker)
         self._codegen: CodegenOrchestrator | None = None
         self._chunk_splitter = ChunkSplitter()
+        self._cache: ScriptCache | None = None
+        if self._config.cache_enabled:
+            self._cache = ScriptCache(cache_dir=self._config.cache_dir)
 
     # * Script export
 
@@ -496,11 +500,29 @@ class Extractor:
         config: ExtractionConfig,
         codegen: CodegenOrchestrator,
     ) -> list[Any]:
-        """Code generation pipeline: generate script → execute → parse."""
-        script = await codegen.generate_script(
-            source, full_sheet, header_rows, config
-        )
-        self._export_script(source, script)
+        """Code generation pipeline: cache lookup → generate script → execute → parse."""
+        script: GeneratedScript | None = None
+
+        # * Cache lookup
+        if self._cache is not None:
+            signature = compute_structure_signature(
+                full_sheet, header_rows, config.output_schema
+            )
+            script = self._cache.get(signature)
+
+        if script is None:
+            # * Cache miss — generate via LLM
+            script = await codegen.generate_script(
+                source, full_sheet, header_rows, config
+            )
+            self._export_script(source, script)
+
+            # * Store in cache
+            if self._cache is not None:
+                self._cache.put(
+                    signature, script, full_sheet, header_rows, config.output_schema
+                )
+
         return await codegen.run_extraction(
             source, script, config.output_schema
         )

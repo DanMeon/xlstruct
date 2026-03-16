@@ -46,6 +46,17 @@ class ExtractorConfig(BaseModel):
         description="Directory to save generated codegen scripts. "
         "When set, scripts are automatically exported after successful generation.",
     )
+    cache_enabled: bool = Field(
+        default=True,
+        description="Enable script caching for codegen mode. "
+        "When enabled, generated scripts are cached by sheet structure signature "
+        "and reused for files with the same layout.",
+    )
+    cache_dir: PathLibPath | None = Field(
+        default=None,
+        description="Directory for script cache. "
+        "Defaults to ~/.xlstruct/cache/ when cache_enabled is True.",
+    )
     provider_options: dict[str, Any] = Field(default_factory=dict)
     storage_options: dict[str, Any] = Field(default_factory=dict)
 
