@@ -20,6 +20,7 @@ from xlstruct.exceptions import ReaderError
 from xlstruct.extraction.chunking import ChunkSplitter, needs_chunking
 from xlstruct.extraction.engine import ExtractionEngine
 from xlstruct.reader.hybrid_reader import HybridReader
+from xlstruct.schemas.batch import BatchResult, FileResult
 from xlstruct.schemas.codegen import GeneratedScript
 from xlstruct.schemas.core import SheetData, WorkbookData
 from xlstruct.schemas.usage import TokenUsage, UsageTracker
@@ -333,6 +334,77 @@ class Extractor:
     ) -> type[BaseModel]:
         """Synchronous wrapper for suggest_schema(). Jupyter-compatible."""
         return _run_sync(self.suggest_schema(source, **kwargs))  # type: ignore[no-any-return]
+
+    # * Batch extraction
+
+    async def extract_batch(
+        self,
+        sources: list[str],
+        schema: type[T] | None = None,
+        *,
+        extraction_config: ExtractionConfig | None = None,
+        concurrency: int = 5,
+        sheet: str | None = None,
+        instructions: str | None = None,
+        **storage_options: Any,
+    ) -> BatchResult[T]:
+        """Extract structured data from multiple files in parallel.
+
+        Processes files concurrently with a configurable concurrency limit.
+        Individual file failures do not stop the batch — partial results are returned.
+
+        Args:
+            sources: List of file paths or URLs.
+            schema: Pydantic model class defining the target structure.
+            extraction_config: Per-extraction config (applied to all files).
+            concurrency: Max number of files processed simultaneously (default 5).
+            sheet: Target sheet name (applied to all files).
+            instructions: Optional natural-language hints for the LLM.
+            **storage_options: Backend-specific storage options.
+
+        Returns:
+            BatchResult with per-file results and aggregated usage.
+        """
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _process_one(source: str) -> FileResult[T]:
+            async with semaphore:
+                try:
+                    result = await self.extract(
+                        source,
+                        schema,
+                        extraction_config=extraction_config,
+                        sheet=sheet,
+                        instructions=instructions,
+                        **storage_options,
+                    )
+                    return FileResult(
+                        source=source,
+                        success=True,
+                        records=list(result),
+                        usage=result.usage,
+                    )
+                except Exception as e:
+                    logger.warning("Batch extraction failed for %s: %s", source, e)
+                    return FileResult(
+                        source=source,
+                        success=False,
+                        error=f"{type(e).__name__}: {e}",
+                    )
+
+        file_results = await asyncio.gather(*[_process_one(s) for s in sources])
+        return BatchResult(results=list(file_results))
+
+    def extract_batch_sync(
+        self,
+        sources: list[str],
+        schema: type[T] | None = None,
+        **kwargs: Any,
+    ) -> BatchResult[T]:
+        """Synchronous wrapper for extract_batch(). Jupyter-compatible."""
+        return _run_sync(  # type: ignore[no-any-return]
+            self.extract_batch(sources, schema, **kwargs)
+        )
 
     # * Private pipeline methods
 
