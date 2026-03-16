@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xlstruct"
-version = "0.2.0"
+version = "0.3.0"
 description = "LLM-powered Excel parser — define a Pydantic schema, get structured data from any Excel file"
 license = "MIT"
 readme = "README.md"
