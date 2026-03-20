@@ -1,84 +1,92 @@
-"""XLStruct CLI — thin wrapper over Extractor.extract_sync()."""
+"""XLStruct CLI — schema suggestion from Excel files."""
 
-import importlib
-import json
-import sys
 from pathlib import Path as PathLibPath
-from typing import Any
 
 import typer
+from pydantic import BaseModel
 
 app = typer.Typer(name="xlstruct", help="LLM-powered Excel parser")
 
 
-def _resolve_schema(schema_str: str) -> type:
-    """Resolve 'module.path:ClassName' string to actual class.
+def _render_schema_source(model_cls: "type[BaseModel]") -> str:
+    """Convert a dynamically created Pydantic model to Python source code."""
+    # ^ Collect type names for imports
+    imports: set[str] = set()
+    lines: list[str] = []
 
-    Adds current directory to sys.path to support local modules.
-    """
-    if ":" not in schema_str:
-        typer.echo(f"Error: schema must be 'module:ClassName', got '{schema_str}'", err=True)
-        raise typer.Exit(1)
+    for name, field_info in model_cls.model_fields.items():
+        annotation = field_info.annotation
+        type_str = _annotation_to_str(annotation, imports) if annotation else "str"
+        desc = field_info.description or ""
+        lines.append(f'    {name}: {type_str} = Field(description="{desc}")')
 
-    module_path, class_name = schema_str.rsplit(":", 1)
+    # * Build import block
+    import_lines = ["from pydantic import BaseModel, Field"]
+    if imports:
+        import_lines.insert(0, f"from datetime import {', '.join(sorted(imports))}")
 
-    # ^ Ensure current dir is importable
-    cwd = str(PathLibPath.cwd())
-    if cwd not in sys.path:
-        sys.path.insert(0, cwd)
+    header = "\n".join(import_lines)
+    body = "\n".join(lines)
 
-    try:
-        module = importlib.import_module(module_path)
-    except ImportError as e:
-        typer.echo(f"Error: cannot import module '{module_path}': {e}", err=True)
-        raise typer.Exit(1)
+    return f"{header}\n\n\nclass {model_cls.__name__}(BaseModel):\n{body}\n"
 
-    cls: type | None = getattr(module, class_name, None)
-    if cls is None:
-        typer.echo(f"Error: class '{class_name}' not found in '{module_path}'", err=True)
-        raise typer.Exit(1)
 
-    return cls
+def _annotation_to_str(annotation: type, imports: set[str]) -> str:
+    """Convert a type annotation to its string representation."""
+    import types
+    from typing import get_args, get_origin
+
+    origin = get_origin(annotation)
+
+    # ^ Union type (X | None)
+    if origin is types.UnionType:
+        args = get_args(annotation)
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1 and len(args) == 2:
+            inner = _annotation_to_str(non_none[0], imports)
+            return f"{inner} | None"
+
+    # ^ Simple types
+    type_name_map: dict[type, str] = {
+        str: "str",
+        int: "int",
+        float: "float",
+        bool: "bool",
+    }
+    if annotation in type_name_map:
+        return type_name_map[annotation]
+
+    # ^ datetime types
+    import datetime
+
+    if annotation is datetime.date:
+        imports.add("date")
+        return "date"
+    if annotation is datetime.datetime:
+        imports.add("datetime")
+        return "datetime"
+
+    return annotation.__name__ if hasattr(annotation, "__name__") else str(annotation)
 
 
 @app.command()
-def extract(
+def suggest(
     source: str = typer.Argument(..., help="Excel file path or URL (s3://, az://, gs://)"),
-    schema: str = typer.Option(..., "--schema", "-s", help="Pydantic model as 'module:Class'"),
     provider: str = typer.Option("openai/gpt-4o", "--provider", "-p"),
-    mode: str = typer.Option("auto", "--mode", "-m", help="Extraction mode: auto, direct, codegen"),
     sheet: str | None = typer.Option(None, "--sheet"),
     instructions: str | None = typer.Option(None, "--instructions", "-i"),
-    output: str | None = typer.Option(None, "--output", "-o", help="Output JSON file path"),
-    temperature: float = typer.Option(0.0, "--temperature"),
-    max_retries: int = typer.Option(3, "--max-retries"),
+    output: str | None = typer.Option(None, "--output", "-o", help="Save schema to .py file"),
 ) -> None:
-    """Extract structured data from an Excel file using LLM."""
-    from xlstruct.config import ExtractionConfig, ExtractionMode  # ^ Lazy import
+    """Analyze an Excel file and suggest a Pydantic schema."""
     from xlstruct.extractor import Extractor
 
-    schema_cls = _resolve_schema(schema)
-    extractor = Extractor(provider=provider, temperature=temperature, max_retries=max_retries)
+    extractor = Extractor(provider=provider)
+    model_cls = extractor.suggest_schema_sync(source, sheet=sheet, instructions=instructions)
 
-    extraction_config = ExtractionConfig(
-        mode=ExtractionMode(mode),
-        output_schema=schema_cls,
-        sheet=sheet,
-        instructions=instructions,
-    )
-
-    # ^ CLI runs in sync context
-    results: list[Any] = extractor.extract_sync(source, extraction_config=extraction_config)
-
-    output_json = json.dumps(
-        [r.model_dump() for r in results],
-        ensure_ascii=False,
-        indent=2,
-        default=str,
-    )
+    source_code = _render_schema_source(model_cls)
 
     if output:
-        PathLibPath(output).write_text(output_json, encoding="utf-8")
-        typer.echo(f"Results written to {output} ({len(results)} records)")
+        PathLibPath(output).write_text(source_code, encoding="utf-8")
+        typer.echo(f"Schema written to {output}")
     else:
-        typer.echo(output_json)
+        typer.echo(source_code)

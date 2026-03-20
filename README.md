@@ -347,19 +347,17 @@ results = await extractor.extract(
 ## CLI
 
 ```bash
-# Basic usage
-xlstruct extract invoice.xlsx --schema myapp.models:InvoiceItem
+# Suggest a Pydantic schema from an Excel file
+xlstruct suggest invoice.xlsx
+
+# Save to file
+xlstruct suggest report.xlsx --output schema.py
 
 # With options
-xlstruct extract report.xlsx \
-  --schema myapp.models:SalesRecord \
+xlstruct suggest report.xlsx \
   --provider anthropic/claude-sonnet-4-6 \
-  --mode codegen \
   --sheet "Q1 Sales" \
-  --instructions "Ignore summary rows" \
-  --temperature 0.0 \
-  --max-retries 3 \
-  --output results.json
+  --instructions "Focus on financial columns"
 ```
 
 ## Configuration

@@ -1,153 +1,86 @@
 """Tests for CLI module."""
 
-import json
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-from click.exceptions import Exit as ClickExit
+from pydantic import Field, create_model
 from typer.testing import CliRunner
 
-from xlstruct.cli import _resolve_schema, app
+from xlstruct.cli import _render_schema_source, app
 
 runner = CliRunner()
 
 
-class TestResolveSchema:
-    def test_valid_schema(self):
-        cls = _resolve_schema("pydantic:BaseModel")
-        from pydantic import BaseModel
+class TestRenderSchemaSource:
+    def test_simple_model(self):
+        Model = create_model(
+            "Invoice",
+            amount=(float, Field(description="Total amount")),
+            name=(str, Field(description="Customer name")),
+        )
+        source = _render_schema_source(Model)
+        assert "class Invoice(BaseModel):" in source
+        assert "amount: float" in source
+        assert "name: str" in source
+        assert "from pydantic import BaseModel, Field" in source
 
-        assert cls is BaseModel
+    def test_nullable_field(self):
+        Model = create_model(
+            "Row",
+            value=(float | None, Field(description="Optional value")),
+        )
+        source = _render_schema_source(Model)
+        assert "float | None" in source
 
-    def test_missing_colon(self):
-        with pytest.raises(ClickExit):
-            _resolve_schema("no_colon_here")
+    def test_date_fields(self):
+        import datetime
 
-    def test_invalid_module(self):
-        with pytest.raises(ClickExit):
-            _resolve_schema("nonexistent_module_xyz:Foo")
+        Model = create_model(
+            "Event",
+            start=(datetime.date, Field(description="Start date")),
+            created=(datetime.datetime, Field(description="Created at")),
+        )
+        source = _render_schema_source(Model)
+        assert "from datetime import date, datetime" in source
+        assert "start: date" in source
+        assert "created: datetime" in source
 
-    def test_invalid_class(self):
-        with pytest.raises(ClickExit):
-            _resolve_schema("pydantic:NonExistentClassName")
 
-
-class TestExtractCommand:
-    def test_missing_schema_option(self):
-        """CLI should fail without --schema."""
-        result = runner.invoke(app, ["test.xlsx"])
-        assert result.exit_code != 0
-
-    def test_extract_with_mocked_extractor(self, tmp_path):
-        """Full CLI flow with mocked Extractor."""
-        from pydantic import BaseModel
-
-        class Item(BaseModel):
-            name: str
-            value: int
-
-        mock_results = [Item(name="Test", value=42)]
-
-        # ^ Write a dummy schema module
-        schema_file = tmp_path / "schema.py"
-        schema_file.write_text(
-            "from pydantic import BaseModel\n\n"
-            "class Item(BaseModel):\n"
-            "    name: str\n"
-            "    value: int\n"
+class TestSuggestCommand:
+    def test_suggest_stdout(self):
+        """suggest command prints schema source to stdout."""
+        mock_model = create_model(
+            "Product",
+            name=(str, Field(description="Product name")),
+            price=(float, Field(description="Unit price")),
         )
 
-        # ^ Create a dummy xlsx
-        import io
-
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws["A1"] = "Name"
-        ws["B1"] = "Value"
-        ws["A2"] = "Test"
-        ws["B2"] = 42
-        buf = io.BytesIO()
-        wb.save(buf)
-        xlsx_path = tmp_path / "test.xlsx"
-        xlsx_path.write_bytes(buf.getvalue())
-
-        with (
-            patch("sys.path", [str(tmp_path)] + sys.path),
-            patch("xlstruct.extractor.Extractor.extract_sync", return_value=mock_results),
-            patch(
-                "xlstruct.extraction.engine.build_instructor_client",
-                return_value=MagicMock(),
-            ),
-        ):
-            result = runner.invoke(
-                app,
-                [
-                    str(xlsx_path),
-                    "--schema",
-                    "schema:Item",
-                ],
-            )
-
-        assert result.exit_code == 0, result.output
-        output = json.loads(result.output)
-        assert len(output) == 1
-        assert output[0]["name"] == "Test"
-        assert output[0]["value"] == 42
-
-    def test_extract_output_to_file(self, tmp_path):
-        """Test --output flag writes JSON to file."""
-        from pydantic import BaseModel
-
-        class Row(BaseModel):
-            x: int
-
-        mock_results = [Row(x=1), Row(x=2)]
-
-        # ^ Schema module
-        schema_file = tmp_path / "s.py"
-        schema_file.write_text(
-            "from pydantic import BaseModel\n\nclass Row(BaseModel):\n    x: int\n"
+        mock_extractor = patch(
+            "xlstruct.extractor.Extractor",
+            return_value=type("E", (), {"suggest_schema_sync": lambda *a, **kw: mock_model})(),
         )
-
-        # ^ Dummy xlsx
-        import io
-
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws["A1"] = "X"
-        ws["A2"] = 1
-        ws["A3"] = 2
-        buf = io.BytesIO()
-        wb.save(buf)
-        xlsx_path = tmp_path / "data.xlsx"
-        xlsx_path.write_bytes(buf.getvalue())
-        output_path = tmp_path / "out.json"
-
-        with (
-            patch("sys.path", [str(tmp_path)] + sys.path),
-            patch("xlstruct.extractor.Extractor.extract_sync", return_value=mock_results),
-            patch(
-                "xlstruct.extraction.engine.build_instructor_client",
-                return_value=MagicMock(),
-            ),
-        ):
-            result = runner.invoke(
-                app,
-                [
-                    str(xlsx_path),
-                    "--schema",
-                    "s:Row",
-                    "--output",
-                    str(output_path),
-                ],
-            )
+        with mock_extractor:
+            result = runner.invoke(app, ["test.xlsx", "--provider", "openai/gpt-4o"])
 
         assert result.exit_code == 0, result.output
-        assert output_path.exists()
-        data = json.loads(output_path.read_text())
-        assert len(data) == 2
+        assert "class Product(BaseModel):" in result.output
+        assert "name: str" in result.output
+        assert "price: float" in result.output
+
+    def test_suggest_output_to_file(self, tmp_path):
+        """suggest --output writes schema to .py file."""
+        mock_model = create_model(
+            "Row",
+            x=(int, Field(description="X value")),
+        )
+        output_path = tmp_path / "schema.py"
+
+        mock_extractor = patch(
+            "xlstruct.extractor.Extractor",
+            return_value=type("E", (), {"suggest_schema_sync": lambda *a, **kw: mock_model})(),
+        )
+        with mock_extractor:
+            result = runner.invoke(app, ["test.xlsx", "--output", str(output_path)])
+
+        assert result.exit_code == 0, result.output
+        content = output_path.read_text()
+        assert "class Row(BaseModel):" in content
