@@ -7,6 +7,7 @@ Delegates code generation to CodegenOrchestrator.
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path as PathLibPath
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -27,13 +28,14 @@ from xlstruct.config import (
     build_instructor_client,
 )
 from xlstruct.encoder.compressed import CompressedEncoder
-from xlstruct.exceptions import ReaderError
+from xlstruct.exceptions import ErrorCode, ReaderError
 from xlstruct.extraction.chunking import ChunkSplitter, needs_chunking
 from xlstruct.extraction.engine import ExtractionEngine
 from xlstruct.reader.hybrid_reader import HybridReader
 from xlstruct.schemas.batch import BatchResult, FileResult
 from xlstruct.schemas.codegen import GeneratedScript
 from xlstruct.schemas.core import SheetData, WorkbookData
+from xlstruct.schemas.progress import ProgressEvent, ProgressStatus
 from xlstruct.schemas.report import ExtractionReport
 from xlstruct.schemas.usage import UsageTracker
 from xlstruct.schemas.workbook import SheetResult, WorkbookResult
@@ -134,6 +136,15 @@ class Extractor:
         self._cache: ScriptCache | None = None
         if self._config.cache_enabled:
             self._cache = ScriptCache(cache_dir=self._config.cache_dir)
+
+    @property
+    def cache(self) -> ScriptCache | None:
+        """Access the script cache for codegen mode.
+
+        Returns None if caching is disabled (``cache_enabled=False``).
+        When enabled, provides ``list_entries()``, ``clear()``, ``remove()`` methods.
+        """
+        return self._cache
 
     # * Script export
 
@@ -385,6 +396,7 @@ class Extractor:
         *,
         concurrency: int = 5,
         instructions: str | None = None,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
         **storage_options: Any,
     ) -> WorkbookResult:
         """Extract structured data from multiple sheets in a single workbook.
@@ -397,6 +409,7 @@ class Extractor:
             sheet_schemas: Mapping of sheet name → Pydantic model class.
             concurrency: Max sheets processed simultaneously (default 5).
             instructions: Optional natural-language hints for the LLM.
+            on_progress: Optional callback invoked after each sheet completes.
             **storage_options: Backend-specific storage options.
 
         Returns:
@@ -406,40 +419,77 @@ class Extractor:
         workbook = await self._load_workbook(source, sheet_name=None, **storage_options)
 
         semaphore = asyncio.Semaphore(concurrency)
+        total = len(sheet_schemas)
+        completed_count = 0
+        count_lock = asyncio.Lock()
 
         async def _extract_sheet(
             sheet_name: str, schema: type[BaseModel]
         ) -> tuple[str, SheetResult[Any]]:
+            nonlocal completed_count
+
+            if on_progress:
+                on_progress(ProgressEvent(
+                    source=sheet_name,
+                    status=ProgressStatus.STARTED,
+                    completed=completed_count,
+                    total=total,
+                ))
+
             async with semaphore:
                 sheet_data = workbook.get_sheet(sheet_name)
                 if sheet_data is None:
-                    return sheet_name, SheetResult(
+                    error_msg = (
+                        f"Sheet '{sheet_name}' not found. "
+                        f"Available: {workbook.sheet_names}"
+                    )
+                    sheet_result: SheetResult[Any] = SheetResult(
                         sheet_name=sheet_name,
                         success=False,
-                        error=f"Sheet '{sheet_name}' not found. "
-                        f"Available: {workbook.sheet_names}",
+                        error=error_msg,
                     )
-                try:
-                    tracker = UsageTracker()
-                    engine = ExtractionEngine(self._config, tracker=tracker)
-                    items = await self._run_sheet_extraction(
-                        sheet_data, schema, instructions, engine=engine
-                    )
-                    return sheet_name, SheetResult(
-                        sheet_name=sheet_name,
-                        success=True,
-                        records=items,
-                        usage=tracker.snapshot(),
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Workbook extraction failed for sheet '%s': %s", sheet_name, e
-                    )
-                    return sheet_name, SheetResult(
-                        sheet_name=sheet_name,
-                        success=False,
-                        error=f"{type(e).__name__}: {e}",
-                    )
+                    status = ProgressStatus.FAILED
+                else:
+                    try:
+                        tracker = UsageTracker()
+                        engine = ExtractionEngine(self._config, tracker=tracker)
+                        items = await self._run_sheet_extraction(
+                            sheet_data, schema, instructions, engine=engine
+                        )
+                        sheet_result = SheetResult(
+                            sheet_name=sheet_name,
+                            success=True,
+                            records=items,
+                            usage=tracker.snapshot(),
+                        )
+                        status = ProgressStatus.COMPLETED
+                        error_msg = None
+                    except Exception as e:
+                        logger.warning(
+                            "Workbook extraction failed for sheet '%s': %s", sheet_name, e
+                        )
+                        error_msg = f"{type(e).__name__}: {e}"
+                        sheet_result = SheetResult(
+                            sheet_name=sheet_name,
+                            success=False,
+                            error=error_msg,
+                        )
+                        status = ProgressStatus.FAILED
+
+            async with count_lock:
+                completed_count += 1
+                current_completed = completed_count
+
+            if on_progress:
+                on_progress(ProgressEvent(
+                    source=sheet_name,
+                    status=status,
+                    completed=current_completed,
+                    total=total,
+                    error=error_msg,
+                ))
+
+            return sheet_name, sheet_result
 
         pairs = await asyncio.gather(
             *[_extract_sheet(name, schema) for name, schema in sheet_schemas.items()]
@@ -468,6 +518,7 @@ class Extractor:
         concurrency: int = 5,
         sheet: str | None = None,
         instructions: str | None = None,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
         **storage_options: Any,
     ) -> BatchResult[T]:
         """Extract structured data from multiple files in parallel.
@@ -482,14 +533,28 @@ class Extractor:
             concurrency: Max number of files processed simultaneously (default 5).
             sheet: Target sheet name (applied to all files).
             instructions: Optional natural-language hints for the LLM.
+            on_progress: Optional callback invoked after each file completes.
             **storage_options: Backend-specific storage options.
 
         Returns:
             BatchResult with per-file results and aggregated usage.
         """
         semaphore = asyncio.Semaphore(concurrency)
+        total = len(sources)
+        completed_count = 0
+        count_lock = asyncio.Lock()
 
         async def _process_one(source: str) -> FileResult[T]:
+            nonlocal completed_count
+
+            if on_progress:
+                on_progress(ProgressEvent(
+                    source=source,
+                    status=ProgressStatus.STARTED,
+                    completed=completed_count,
+                    total=total,
+                ))
+
             async with semaphore:
                 try:
                     result = await self.extract(
@@ -500,19 +565,38 @@ class Extractor:
                         instructions=instructions,
                         **storage_options,
                     )
-                    return FileResult(
+                    file_result = FileResult(
                         source=source,
                         success=True,
                         records=list(result),
                         usage=result.report.usage,
                     )
+                    status = ProgressStatus.COMPLETED
+                    error_msg = None
                 except Exception as e:
                     logger.warning("Batch extraction failed for %s: %s", source, e)
-                    return FileResult(
+                    error_msg = f"{type(e).__name__}: {e}"
+                    file_result = FileResult(
                         source=source,
                         success=False,
-                        error=f"{type(e).__name__}: {e}",
+                        error=error_msg,
                     )
+                    status = ProgressStatus.FAILED
+
+            async with count_lock:
+                completed_count += 1
+                current_completed = completed_count
+
+            if on_progress:
+                on_progress(ProgressEvent(
+                    source=source,
+                    status=status,
+                    completed=current_completed,
+                    total=total,
+                    error=error_msg,
+                ))
+
+            return file_result
 
         file_results = await asyncio.gather(*[_process_one(s) for s in sources])
         return BatchResult(results=list(file_results))
@@ -537,7 +621,10 @@ class Extractor:
         for ext in (".xlsm", ".xltx", ".xltm", ".xlsx", ".xls", ".csv"):
             if lower.endswith(ext):
                 return ext
-        raise ReaderError(f"Unsupported file format: {source}")
+        raise ReaderError(
+            f"Unsupported file format: {source}",
+            code=ErrorCode.READER_UNSUPPORTED_FORMAT,
+        )
 
     async def _load_workbook(
         self,
