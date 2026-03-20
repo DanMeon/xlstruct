@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-20
+
+### Added
+
+- **Progress tracking** — `on_progress` callback for `extract_batch()` and `extract_workbook()`
+  - `ProgressEvent` and `ProgressStatus` models (`schemas/progress.py`)
+  - Reports `STARTED`, `COMPLETED`, `FAILED` status with completed/total counts
+  - Compatible with tqdm and custom progress UIs
+- **Error code system** — machine-readable `ErrorCode` enum on all exceptions
+  - 12 error codes: `STORAGE_NOT_FOUND`, `CODEGEN_MAX_RETRIES`, `EXTRACTION_LLM_FAILED`, etc.
+  - `XLStructError.code` field for programmatic error handling (e.g. `match e.code`)
+- **Public cache API** — `Extractor.cache` property exposes `ScriptCache` for inspection and management
+- **Extraction report** — `ExtractionResult.report` with mode used, token usage, and optional row provenance
+- **Row provenance** — `track_provenance=True` tracks source Excel row numbers per record
+- **DataFrame export** — `ExtractionResult.to_dataframe()` converts results to pandas DataFrame
+- **Multi-sheet extraction** — `extract_workbook()` extracts different schemas from different sheets in parallel
+
+### Changed
+
+- Centralized Instructor client creation via `build_instructor_client()` helper
+- Unified CodegenEngine LLM calls through shared `_call_llm()` method
+
 ## [0.3.0] - 2026-03-16
 
 ### Added
