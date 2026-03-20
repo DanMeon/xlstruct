@@ -66,8 +66,7 @@ class CodegenOrchestrator:
 
         if not detection.header_rows:
             raise ExtractionError(
-                "Header detection returned empty result. "
-                "Please provide --header-rows explicitly.",
+                "Header detection returned empty result. Please provide --header-rows explicitly.",
                 code=ErrorCode.EXTRACTION_HEADER_DETECTION_FAILED,
             )
 
@@ -162,7 +161,9 @@ class CodegenOrchestrator:
         # * Validate + self-correct
         if self._config.max_codegen_retries > 0:
             result, _ = await self._validate_and_correct(
-                result, messages, source,
+                result,
+                messages,
+                source,
                 output_schema=extraction_config.output_schema,
                 total_data_rows=total_data_rows,
             )
@@ -178,7 +179,9 @@ class CodegenOrchestrator:
         """Execute a validated script and parse JSON output into Pydantic models."""
         validator = ScriptValidator(timeout=self._config.codegen_timeout, backend=self._backend)
         validation = await validator.validate(
-            script.code, source, output_schema=output_schema,
+            script.code,
+            source,
+            output_schema=output_schema,
         )
 
         if not validation.success:
@@ -218,25 +221,32 @@ class CodegenOrchestrator:
                 error_msg = f"SyntaxError at line {e.lineno}: {e.msg}"
                 logger.info(
                     "Codegen attempt %d/%d: syntax error — %s",
-                    attempt_num, max_retries, error_msg,
+                    attempt_num,
+                    max_retries,
+                    error_msg,
                 )
-                attempts.append(CodegenAttempt(
-                    attempt=attempt_num,
-                    code=current_code,
-                    error=error_msg,
-                ))
+                attempts.append(
+                    CodegenAttempt(
+                        attempt=attempt_num,
+                        code=current_code,
+                        error=error_msg,
+                    )
+                )
                 if attempt_num == max_retries:
                     break
                 current_result = await self._request_correction(
-                    messages, error_msg,
-                    attempt_num, max_retries,
+                    messages,
+                    error_msg,
+                    attempt_num,
+                    max_retries,
                 )
                 current_code = current_result.code
                 continue
 
             # * Validate by execution + output schema
             validation = await validator.validate(
-                current_code, source,
+                current_code,
+                source,
                 output_schema=output_schema,
                 total_data_rows=total_data_rows,
             )
@@ -245,28 +255,35 @@ class CodegenOrchestrator:
                 if attempt_num > 1:
                     logger.info(
                         "Codegen attempt %d/%d: success after correction",
-                        attempt_num, max_retries,
+                        attempt_num,
+                        max_retries,
                     )
                 return current_result, validation.stdout
 
             # * Record failed attempt
             logger.info(
                 "Codegen attempt %d/%d: runtime error\n%s",
-                attempt_num, max_retries, validation.truncated_traceback,
+                attempt_num,
+                max_retries,
+                validation.truncated_traceback,
             )
-            attempts.append(CodegenAttempt(
-                attempt=attempt_num,
-                code=current_code,
-                error=validation.truncated_traceback,
-            ))
+            attempts.append(
+                CodegenAttempt(
+                    attempt=attempt_num,
+                    code=current_code,
+                    error=validation.truncated_traceback,
+                )
+            )
 
             if attempt_num == max_retries:
                 break
 
             # * Request correction via conversation history
             current_result = await self._request_correction(
-                messages, validation.truncated_traceback,
-                attempt_num, max_retries,
+                messages,
+                validation.truncated_traceback,
+                attempt_num,
+                max_retries,
                 timed_out=validation.timed_out,
             )
             current_code = current_result.code

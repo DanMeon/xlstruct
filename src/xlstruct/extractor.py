@@ -221,9 +221,7 @@ class Extractor:
             raise ValueError("Either schema or extraction_config must be provided")
 
         # * Collect provenance from records (set by ExtractionEngine._split_provenance)
-        source_rows: list[list[int]] = [
-            getattr(item, "_source_rows", []) for item in items
-        ]
+        source_rows: list[list[int]] = [getattr(item, "_source_rows", []) for item in items]
         # ^ Only include if any provenance was actually tracked
         if not any(source_rows):
             source_rows = []
@@ -265,9 +263,7 @@ class Extractor:
         if header_rows is None:
             header_rows = await codegen.detect_header_rows(full_sheet)
 
-        script = await codegen.generate_script(
-            source, full_sheet, header_rows, extraction_config
-        )
+        script = await codegen.generate_script(source, full_sheet, header_rows, extraction_config)
         self._export_script(source, script)
         return script
 
@@ -429,20 +425,19 @@ class Extractor:
             nonlocal completed_count
 
             if on_progress:
-                on_progress(ProgressEvent(
-                    source=sheet_name,
-                    status=ProgressStatus.STARTED,
-                    completed=completed_count,
-                    total=total,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        source=sheet_name,
+                        status=ProgressStatus.STARTED,
+                        completed=completed_count,
+                        total=total,
+                    )
+                )
 
             async with semaphore:
                 sheet_data = workbook.get_sheet(sheet_name)
                 if sheet_data is None:
-                    error_msg = (
-                        f"Sheet '{sheet_name}' not found. "
-                        f"Available: {workbook.sheet_names}"
-                    )
+                    error_msg = f"Sheet '{sheet_name}' not found. Available: {workbook.sheet_names}"
                     sheet_result: SheetResult[Any] = SheetResult(
                         sheet_name=sheet_name,
                         success=False,
@@ -481,13 +476,15 @@ class Extractor:
                 current_completed = completed_count
 
             if on_progress:
-                on_progress(ProgressEvent(
-                    source=sheet_name,
-                    status=status,
-                    completed=current_completed,
-                    total=total,
-                    error=error_msg,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        source=sheet_name,
+                        status=status,
+                        completed=current_completed,
+                        total=total,
+                        error=error_msg,
+                    )
+                )
 
             return sheet_name, sheet_result
 
@@ -548,12 +545,14 @@ class Extractor:
             nonlocal completed_count
 
             if on_progress:
-                on_progress(ProgressEvent(
-                    source=source,
-                    status=ProgressStatus.STARTED,
-                    completed=completed_count,
-                    total=total,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        source=source,
+                        status=ProgressStatus.STARTED,
+                        completed=completed_count,
+                        total=total,
+                    )
+                )
 
             async with semaphore:
                 try:
@@ -588,13 +587,15 @@ class Extractor:
                 current_completed = completed_count
 
             if on_progress:
-                on_progress(ProgressEvent(
-                    source=source,
-                    status=status,
-                    completed=current_completed,
-                    total=total,
-                    error=error_msg,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        source=source,
+                        status=status,
+                        completed=current_completed,
+                        total=total,
+                        error=error_msg,
+                    )
+                )
 
             return file_result
 
@@ -642,14 +643,10 @@ class Extractor:
             from xlstruct.reader.csv_reader import CsvReader
 
             csv_reader = CsvReader()
-            workbook = await asyncio.to_thread(
-                csv_reader.read, file_bytes, sheet_name
-            )
+            workbook = await asyncio.to_thread(csv_reader.read, file_bytes, sheet_name)
         else:
             reader = HybridReader()
-            workbook = await asyncio.to_thread(
-                reader.read, file_bytes, sheet_name, source_ext=ext
-            )
+            workbook = await asyncio.to_thread(reader.read, file_bytes, sheet_name, source_ext=ext)
 
         workbook.file_name = source.rsplit("/", 1)[-1]
         workbook.file_size = len(file_bytes)
@@ -670,9 +667,7 @@ class Extractor:
         Returns:
             Tuple of (extracted items, resolved extraction mode).
         """
-        workbook = await self._load_workbook(
-            source, sheet_name=config.sheet, **storage_options
-        )
+        workbook = await self._load_workbook(source, sheet_name=config.sheet, **storage_options)
         full_sheet = workbook.sheets[0]
         codegen = self._get_codegen()
 
@@ -692,7 +687,8 @@ class Extractor:
                 mode = ExtractionMode.DIRECT
             logger.info(
                 "Auto-routing: %d data rows → mode=%s",
-                data_rows, mode.value,
+                data_rows,
+                mode.value,
             )
 
         if mode == ExtractionMode.CODEGEN:
@@ -715,27 +711,19 @@ class Extractor:
 
         # * Cache lookup
         if self._cache is not None:
-            signature = compute_structure_signature(
-                full_sheet, header_rows, config.output_schema
-            )
+            signature = compute_structure_signature(full_sheet, header_rows, config.output_schema)
             script = self._cache.get(signature)
 
         if script is None:
             # * Cache miss — generate via LLM
-            script = await codegen.generate_script(
-                source, full_sheet, header_rows, config
-            )
+            script = await codegen.generate_script(source, full_sheet, header_rows, config)
             self._export_script(source, script)
 
             # * Store in cache
             if self._cache is not None:
-                self._cache.put(
-                    signature, script, full_sheet, header_rows, config.output_schema
-                )
+                self._cache.put(signature, script, full_sheet, header_rows, config.output_schema)
 
-        return await codegen.run_extraction(
-            source, script, config.output_schema
-        )
+        return await codegen.run_extraction(source, script, config.output_schema)
 
     async def _run_direct(
         self,

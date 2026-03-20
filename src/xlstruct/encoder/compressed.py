@@ -66,8 +66,7 @@ class CompressedEncoder:
         if types:
             active_cols = sorted(types.keys())
             type_parts = [
-                f"{get_column_letter(c)} ({headers.get(c, '?')}): {types[c]}"
-                for c in active_cols
+                f"{get_column_letter(c)} ({headers.get(c, '?')}): {types[c]}" for c in active_cols
             ]
             parts.append("\n### Column Types")
             parts.append(", ".join(type_parts))
@@ -80,9 +79,7 @@ class CompressedEncoder:
 
         parts.append("")
         if shown_data_rows < total_data_rows:
-            parts.append(
-                f"### Data (sample {shown_data_rows} of {total_data_rows} data rows)"
-            )
+            parts.append(f"### Data (sample {shown_data_rows} of {total_data_rows} data rows)")
         parts.append(table_text)
 
         # * Stats

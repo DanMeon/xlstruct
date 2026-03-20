@@ -45,14 +45,41 @@ def merged_sheet() -> SheetData:
     """A sheet with merged header cells."""
     cells = [
         # ^ Merged title spanning A1:D1
-        CellData(row=1, col=1, value="Invoice #2024-001", data_type="s",
-                 is_merged=True, merge_range="A1:D1"),
-        CellData(row=1, col=2, value=None, data_type="n",
-                 is_merged=True, merge_range="A1:D1", merge_origin=(1, 1)),
-        CellData(row=1, col=3, value=None, data_type="n",
-                 is_merged=True, merge_range="A1:D1", merge_origin=(1, 1)),
-        CellData(row=1, col=4, value=None, data_type="n",
-                 is_merged=True, merge_range="A1:D1", merge_origin=(1, 1)),
+        CellData(
+            row=1,
+            col=1,
+            value="Invoice #2024-001",
+            data_type="s",
+            is_merged=True,
+            merge_range="A1:D1",
+        ),
+        CellData(
+            row=1,
+            col=2,
+            value=None,
+            data_type="n",
+            is_merged=True,
+            merge_range="A1:D1",
+            merge_origin=(1, 1),
+        ),
+        CellData(
+            row=1,
+            col=3,
+            value=None,
+            data_type="n",
+            is_merged=True,
+            merge_range="A1:D1",
+            merge_origin=(1, 1),
+        ),
+        CellData(
+            row=1,
+            col=4,
+            value=None,
+            data_type="n",
+            is_merged=True,
+            merge_range="A1:D1",
+            merge_origin=(1, 1),
+        ),
         # ^ Header row
         CellData(row=2, col=1, value="Item", data_type="s"),
         CellData(row=2, col=2, value="Qty", data_type="s"),
@@ -62,8 +89,7 @@ def merged_sheet() -> SheetData:
         CellData(row=3, col=1, value="Widget", data_type="s"),
         CellData(row=3, col=2, value=10, data_type="n"),
         CellData(row=3, col=3, value=25.0, data_type="n"),
-        CellData(row=3, col=4, value=250.0, data_type="n",
-                 formula="=B3*C3", cached_value=250.0),
+        CellData(row=3, col=4, value=250.0, data_type="n", formula="=B3*C3", cached_value=250.0),
     ]
     return SheetData(
         name="Invoice",
@@ -103,5 +129,3 @@ def simple_xlsx_bytes() -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
-
-

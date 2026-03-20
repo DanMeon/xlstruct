@@ -28,10 +28,7 @@ def get_schema_source(schema_cls: type[BaseModel]) -> str:
         except (OSError, TypeError):
             # ^ inspect.getsource() fails for dynamically created classes
             schema_json = cls.model_json_schema()  # type: ignore[attr-defined]
-            sources.append(
-                f"# Schema for {cls.__name__} (source unavailable):\n"
-                f"# {schema_json}\n"
-            )
+            sources.append(f"# Schema for {cls.__name__} (source unavailable):\n# {schema_json}\n")
 
     return "\n\n".join(sources)
 

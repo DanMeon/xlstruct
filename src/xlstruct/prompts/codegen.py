@@ -26,8 +26,8 @@ HEADER_DETECTION_SYSTEM_PROMPT = (
     "\n"
     "### What IS a header row\n"
     "- Rows containing column labels that describe the data in the rows below.\n"
-    "- Multi-level headers: if row 1 has category names (e.g., \"Q1\", \"Q2\") and "
-    "row 2 has subcategory names (e.g., \"Revenue\", \"Cost\"), BOTH are header rows → [1, 2].\n"
+    '- Multi-level headers: if row 1 has category names (e.g., "Q1", "Q2") and '
+    'row 2 has subcategory names (e.g., "Revenue", "Cost"), BOTH are header rows → [1, 2].\n'
     "- Headers are predominantly text/string values (column names, category labels).\n"
     "\n"
     "### What is NOT a header row\n"
@@ -101,7 +101,7 @@ ANALYZER_SYSTEM_PROMPT = (
     "- Identify rows to skip (empty rows, total rows, etc).\n"
     "\n"
     "### Row-to-Record Relationship\n"
-    "- If each Excel row maps to exactly 1 output record, state \"1:1\".\n"
+    '- If each Excel row maps to exactly 1 output record, state "1:1".\n'
     "- If each row produces multiple records (e.g., due to column groups "
     "representing different measurements), describe the exact multiplicity "
     "and how column groups map to individual records.\n"
@@ -266,12 +266,12 @@ CODEGEN_SYSTEM_PROMPT = (
     "columns being empty; instead check if data columns contain numeric values.\n"
     "\n"
     "### Multi-Row Headers\n"
-    "The sample data shows combined headers like \"GroupHeader / SubHeader\". "
+    'The sample data shows combined headers like "GroupHeader / SubHeader". '
     "In the actual Excel file, these are SEPARATE rows. For example, if header row 1 "
-    "has \"Q1\" spanning columns D-E, and header row 2 has \"Revenue\" in D and \"Cost\" in E, "
-    "the combined header is \"Q1 / Revenue\" and \"Q1 / Cost\". "
+    'has "Q1" spanning columns D-E, and header row 2 has "Revenue" in D and "Cost" in E, '
+    'the combined header is "Q1 / Revenue" and "Q1 / Cost". '
     "Your script must read EACH header row separately and combine them. "
-    "Do NOT try to parse the combined \"/\" format from the sample — read the original rows directly.\n"
+    'Do NOT try to parse the combined "/" format from the sample — read the original rows directly.\n'
     "\n"
     "### Column Identification (IMPORTANT)\n"
     "Not every column in the sheet is a data column. Sheets often contain summary columns "
@@ -285,9 +285,9 @@ CODEGEN_SYSTEM_PROMPT = (
     "actually contains a numeric value. Skip or guard against strings, empty values, and None.\n"
     "\n"
     "### Literal Fields and Value Mapping\n"
-    "When a schema field uses `Literal` types (e.g., `Literal[\"EAST\", \"SOUTH\"]`), the script MUST "
+    'When a schema field uses `Literal` types (e.g., `Literal["EAST", "SOUTH"]`), the script MUST '
     "map raw Excel values to one of the allowed Literal values. Use Field `description` to understand "
-    "the mapping (e.g., `description=\"N : NORTH, S : SOUTH\"` means map \"N\" → \"NORTH\").\n"
+    'the mapping (e.g., `description="N : NORTH, S : SOUTH"` means map "N" → "NORTH").\n'
     "For non-Literal fields (`str`, `float`, etc.), pass through values as-is unless the user "
     "provides explicit transformation rules via instructions.\n"
     "\n"
@@ -401,7 +401,7 @@ _CATEGORY_SEPARATOR_GUIDE = (
     "until the next category separator appears.\n"
     "\n"
     "**IMPORTANT:** Category separator rows are often MERGED across many columns "
-    "(e.g., A6:N6 = \"Electronics\"). After forward-filling merged cells, ALL columns "
+    '(e.g., A6:N6 = "Electronics"). After forward-filling merged cells, ALL columns '
     "in a separator row will contain the category text — they will NOT be empty/None. "
     "Do NOT check `if data columns are empty` to detect separators. Instead, check "
     "whether the first data column contains a **numeric** value.\n"
@@ -423,7 +423,7 @@ _CATEGORY_SEPARATOR_GUIDE = (
     "        current_category = str(product_val)\n"
     "        continue\n"
     "\n"
-    '    # Data row — inherit current category\n'
+    "    # Data row — inherit current category\n"
     '    record["category"] = current_category\n'
     "```"
 )

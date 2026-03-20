@@ -20,6 +20,7 @@ class ExtractionMode(StrEnum):
     DIRECT = "direct"
     CODEGEN = "codegen"
 
+
 # * Provider-specific default kwargs for instructor.from_provider()
 PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
     "anthropic": {"max_tokens": 8192},
@@ -122,9 +123,7 @@ def is_anthropic(provider: str) -> bool:
     return provider.split("/")[0] == "anthropic"
 
 
-def apply_cache_control(
-    messages: list[dict[str, Any]], provider: str
-) -> list[dict[str, Any]]:
+def apply_cache_control(messages: list[dict[str, Any]], provider: str) -> list[dict[str, Any]]:
     """Apply Anthropic prompt caching markers to messages.
 
     Wraps system and first user message content with cache_control ephemeral markers.
@@ -140,16 +139,18 @@ def apply_cache_control(
 
         # ^ Apply cache_control to system prompt and first user message
         if role in ("system", "user") and isinstance(content, str):
-            result.append({
-                "role": role,
-                "content": [
-                    {
-                        "type": "text",
-                        "text": content,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-            })
+            result.append(
+                {
+                    "role": role,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": content,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                }
+            )
         else:
             result.append(msg)
     return result

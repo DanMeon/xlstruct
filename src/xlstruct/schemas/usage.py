@@ -87,7 +87,10 @@ class UsageTracker:
             cache_info = f", cache_create={cache_create:,}, cache_read={cache_read:,}"
         logger.info(
             "LLM [%s]: input=%s, output=%s tokens%s",
-            label, f"{input_t:,}", f"{output_t:,}", cache_info,
+            label,
+            f"{input_t:,}",
+            f"{output_t:,}",
+            cache_info,
         )
 
     def snapshot(self) -> TokenUsage:

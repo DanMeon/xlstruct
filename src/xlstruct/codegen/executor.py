@@ -21,72 +21,81 @@ from xlstruct.codegen.backends.subprocess import (  # noqa: F401
 # * Security constants
 
 # ^ Allowlist: only these top-level modules may be imported in generated scripts
-ALLOWED_IMPORTS = frozenset({
-    # * Excel processing
-    "openpyxl",
-    "python_calamine",
-    # * Data modeling
-    "pydantic",
-    # * Standard library — data & math
-    "json",
-    "csv",
-    "re",
-    "datetime",
-    "decimal",
-    "math",
-    "statistics",
-    "numbers",
-    "fractions",
-    # * Standard library — typing & structures
-    "typing",
-    "typing_extensions",
-    "enum",
-    "collections",
-    "dataclasses",
-    "abc",
-    "types",
-    # * Standard library — utilities
-    "copy",
-    "itertools",
-    "functools",
-    "string",
-    "sys",  # ^ needed for sys.argv
-    "warnings",
-    "textwrap",
-    "unicodedata",
-})
+ALLOWED_IMPORTS = frozenset(
+    {
+        # * Excel processing
+        "openpyxl",
+        "python_calamine",
+        # * Data modeling
+        "pydantic",
+        # * Standard library — data & math
+        "json",
+        "csv",
+        "re",
+        "datetime",
+        "decimal",
+        "math",
+        "statistics",
+        "numbers",
+        "fractions",
+        # * Standard library — typing & structures
+        "typing",
+        "typing_extensions",
+        "enum",
+        "collections",
+        "dataclasses",
+        "abc",
+        "types",
+        # * Standard library — utilities
+        "copy",
+        "itertools",
+        "functools",
+        "string",
+        "sys",  # ^ needed for sys.argv
+        "warnings",
+        "textwrap",
+        "unicodedata",
+    }
+)
 
 # ^ Builtin calls that are never allowed in generated scripts
-BLOCKED_BUILTINS = frozenset({
-    "__import__",
-    "exec",
-    "eval",
-    "compile",
-    "open",
-    "breakpoint",
-})
+BLOCKED_BUILTINS = frozenset(
+    {
+        "__import__",
+        "exec",
+        "eval",
+        "compile",
+        "open",
+        "breakpoint",
+    }
+)
 
 # ^ Dunder attributes that indicate sandbox escape attempts
-BLOCKED_DUNDER_ATTRS = frozenset({
-    "__import__",
-    "__subclasses__",
-    "__bases__",
-    "__mro__",
-    "__globals__",
-    "__code__",
-    "__builtins__",
-})
+BLOCKED_DUNDER_ATTRS = frozenset(
+    {
+        "__import__",
+        "__subclasses__",
+        "__bases__",
+        "__mro__",
+        "__globals__",
+        "__code__",
+        "__builtins__",
+    }
+)
 
 # ^ Specific dotted access patterns blocked
-BLOCKED_ATTR_PATTERNS = frozenset({
-    "sys.modules",
-    "sys.path",
-    "sys._getframe",
-    "sys.meta_path",
-})
+BLOCKED_ATTR_PATTERNS = frozenset(
+    {
+        "sys.modules",
+        "sys.path",
+        "sys._getframe",
+        "sys.meta_path",
+    }
+)
 
 
 # * Security scanning
+
 
 def scan_blocked_imports(code: str) -> list[str]:
     """Scan generated code for disallowed imports, dangerous builtins, and escape attempts.

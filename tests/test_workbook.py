@@ -14,6 +14,7 @@ from xlstruct.schemas.workbook import SheetResult, WorkbookResult
 
 # * Test schemas
 
+
 class SalesRow(BaseModel):
     product: str
     revenue: float
@@ -30,6 +31,7 @@ class InventoryRow(BaseModel):
 
 
 # * Fixtures
+
 
 @pytest.fixture(autouse=True)
 def _mock_instructor():
@@ -81,6 +83,7 @@ def multi_sheet_xlsx(tmp_path) -> str:
 
 # * Model tests
 
+
 class TestWorkbookResultModel:
     def test_empty_result(self):
         result = WorkbookResult(results={})
@@ -91,56 +94,68 @@ class TestWorkbookResultModel:
         assert result.sheet_names == []
 
     def test_mixed_results(self):
-        result = WorkbookResult(results={
-            "Sales": SheetResult(
-                sheet_name="Sales",
-                success=True,
-                records=[SalesRow(product="Widget", revenue=1000.0)],
-                usage=TokenUsage(
-                    llm_calls=1, input_tokens=100, output_tokens=50, total_tokens=150
+        result = WorkbookResult(
+            results={
+                "Sales": SheetResult(
+                    sheet_name="Sales",
+                    success=True,
+                    records=[SalesRow(product="Widget", revenue=1000.0)],
+                    usage=TokenUsage(
+                        llm_calls=1, input_tokens=100, output_tokens=50, total_tokens=150
+                    ),
                 ),
-            ),
-            "Expenses": SheetResult(
-                sheet_name="Expenses",
-                success=False,
-                error="ValueError: parse error",
-            ),
-        })
+                "Expenses": SheetResult(
+                    sheet_name="Expenses",
+                    success=False,
+                    error="ValueError: parse error",
+                ),
+            }
+        )
 
         assert result.succeeded == 1
         assert result.failed == 1
         assert result.total == 2
 
     def test_total_usage_aggregation(self):
-        result = WorkbookResult(results={
-            "A": SheetResult(
-                sheet_name="A",
-                success=True,
-                records=[],
-                usage=TokenUsage(llm_calls=1, input_tokens=100, output_tokens=50, total_tokens=150),
-            ),
-            "B": SheetResult(
-                sheet_name="B",
-                success=True,
-                records=[],
-                usage=TokenUsage(llm_calls=2, input_tokens=200, output_tokens=80, total_tokens=280),
-            ),
-        })
+        result = WorkbookResult(
+            results={
+                "A": SheetResult(
+                    sheet_name="A",
+                    success=True,
+                    records=[],
+                    usage=TokenUsage(
+                        llm_calls=1, input_tokens=100, output_tokens=50, total_tokens=150
+                    ),
+                ),
+                "B": SheetResult(
+                    sheet_name="B",
+                    success=True,
+                    records=[],
+                    usage=TokenUsage(
+                        llm_calls=2, input_tokens=200, output_tokens=80, total_tokens=280
+                    ),
+                ),
+            }
+        )
         usage = result.total_usage
         assert usage.llm_calls == 3
         assert usage.input_tokens == 300
         assert usage.total_tokens == 430
 
     def test_total_usage_skips_none(self):
-        result = WorkbookResult(results={
-            "A": SheetResult(sheet_name="A", success=False, error="err"),
-            "B": SheetResult(
-                sheet_name="B",
-                success=True,
-                records=[],
-                usage=TokenUsage(llm_calls=1, input_tokens=50, output_tokens=25, total_tokens=75),
-            ),
-        })
+        result = WorkbookResult(
+            results={
+                "A": SheetResult(sheet_name="A", success=False, error="err"),
+                "B": SheetResult(
+                    sheet_name="B",
+                    success=True,
+                    records=[],
+                    usage=TokenUsage(
+                        llm_calls=1, input_tokens=50, output_tokens=25, total_tokens=75
+                    ),
+                ),
+            }
+        )
         assert result.total_usage.llm_calls == 1
 
     def test_getitem(self):
@@ -154,17 +169,21 @@ class TestWorkbookResultModel:
         assert result["Sales"].records[0].product == "Widget"
 
     def test_contains(self):
-        result = WorkbookResult(results={
-            "Sales": SheetResult(sheet_name="Sales", success=True, records=[]),
-        })
+        result = WorkbookResult(
+            results={
+                "Sales": SheetResult(sheet_name="Sales", success=True, records=[]),
+            }
+        )
         assert "Sales" in result
         assert "Missing" not in result
 
     def test_iteration(self):
-        result = WorkbookResult(results={
-            "Sales": SheetResult(sheet_name="Sales", success=True, records=[]),
-            "Expenses": SheetResult(sheet_name="Expenses", success=True, records=[]),
-        })
+        result = WorkbookResult(
+            results={
+                "Sales": SheetResult(sheet_name="Sales", success=True, records=[]),
+                "Expenses": SheetResult(sheet_name="Expenses", success=True, records=[]),
+            }
+        )
         names = list(result)
         assert names == ["Sales", "Expenses"]
 
@@ -175,6 +194,7 @@ class TestWorkbookResultModel:
 
 
 # * Extractor integration tests
+
 
 class TestExtractWorkbook:
     async def test_all_sheets_succeed(self, multi_sheet_xlsx):

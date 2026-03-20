@@ -51,8 +51,6 @@ class ExtractionError(XLStructError):
 class CodegenValidationError(XLStructError):
     """All codegen retry attempts exhausted."""
 
-    def __init__(
-        self, message: str, attempts: "list[Any]", code: ErrorCode | None = None
-    ) -> None:
+    def __init__(self, message: str, attempts: "list[Any]", code: ErrorCode | None = None) -> None:
         super().__init__(message, code=code)
         self.attempts = attempts

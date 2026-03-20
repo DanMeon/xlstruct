@@ -32,9 +32,7 @@ class _CalamineSheetData:
     # ^ {(1-indexed row, col): range_str}
     merged_cell_map: dict[tuple[int, int], str] = field(default_factory=dict)
     # ^ {(1-indexed row, col): (1-indexed origin row, col)}
-    merge_origins: dict[tuple[int, int], tuple[int, int]] = field(
-        default_factory=dict
-    )
+    merge_origins: dict[tuple[int, int], tuple[int, int]] = field(default_factory=dict)
     # ^ {(1-indexed row, col): calamine value}
     values: dict[tuple[int, int], Any] = field(default_factory=dict)
     # ^ {(1-indexed row, col): "s"|"n"|"d"|"b"}
@@ -42,8 +40,9 @@ class _CalamineSheetData:
     # ^ {(1-indexed row, col): formula_string} — populated by openpyxl pass
     formulas: dict[tuple[int, int], str] = field(default_factory=dict)
 
-
     # ^ Formats where openpyxl can extract formula strings (Pass 2)
+
+
 _OPENPYXL_FORMATS = frozenset({".xlsx", ".xlsm", ".xltx", ".xltm"})
 
 
@@ -135,9 +134,7 @@ class HybridReader:
 
             # * Dimensions
             if sheet.height > 0 and sheet.width > 0:
-                cal.dimensions = (
-                    f"A1:{get_column_letter(sheet.width)}{sheet.height}"
-                )
+                cal.dimensions = f"A1:{get_column_letter(sheet.width)}{sheet.height}"
 
             # * Merged cells (calamine: 0-indexed → 1-indexed)
             merged = sheet.merged_cell_ranges

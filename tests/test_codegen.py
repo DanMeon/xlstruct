@@ -16,6 +16,7 @@ from xlstruct.codegen.validation import ScriptValidator
 
 # * Test schemas
 
+
 class SampleRecord(BaseModel):
     name: str
     value: int
@@ -33,6 +34,7 @@ class OuterModel(BaseModel):
 
 
 # * scan_blocked_imports (allowlist approach)
+
 
 class TestScanBlockedImports:
     # * Allowed imports pass cleanly
@@ -69,11 +71,7 @@ class TestScanBlockedImports:
         assert any("subprocess" in r for r in result)
 
     def test_multiple_disallowed_imports_all_detected(self):
-        code = (
-            "import socket\n"
-            "import subprocess\n"
-            "from urllib.request import urlopen\n"
-        )
+        code = "import socket\nimport subprocess\nfrom urllib.request import urlopen\n"
         result = scan_blocked_imports(code)
         assert any("socket" in r for r in result)
         assert any("subprocess" in r for r in result)
@@ -198,6 +196,7 @@ class TestScanBlockedImports:
 
 # * _build_safe_env
 
+
 class TestBuildSafeEnv:
     def test_credential_key_stripped(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
@@ -253,6 +252,7 @@ class TestBuildSafeEnv:
 
 # * ScriptValidator._extract_traceback
 
+
 class TestExtractTraceback:
     def test_short_stderr_returned_as_is(self):
         stderr = "Traceback (most recent call last):\n  File 'x.py', line 1\nValueError: bad"
@@ -279,6 +279,7 @@ class TestExtractTraceback:
 
 
 # * ScriptValidator._validate_output
+
 
 class TestValidateOutput:
     def test_empty_stdout_returns_error(self):
@@ -324,6 +325,7 @@ class TestValidateOutput:
 
 
 # * ScriptValidator._filter_by_required_fields
+
 
 class TestFilterByRequiredFields:
     def test_null_required_field_filtered_out(self):
@@ -375,6 +377,7 @@ class TestFilterByRequiredFields:
 
 # * get_schema_source
 
+
 class TestGetSchemaSource:
     def test_simple_model_returns_source(self):
         source = get_schema_source(SampleRecord)
@@ -391,6 +394,7 @@ class TestGetSchemaSource:
 
 
 # * ScriptValidator.validate (async)
+
 
 class TestScriptValidatorValidate:
     async def test_disallowed_imports_returns_failure_without_execution(self):

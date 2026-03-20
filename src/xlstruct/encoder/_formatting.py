@@ -15,6 +15,7 @@ from xlstruct.schemas.core import CellData, SheetData
 
 # * Cell value formatting
 
+
 def format_cell_value(cell: CellData) -> str:
     """Format a cell's display value as a clean string.
 
@@ -40,6 +41,7 @@ def format_cell_value(cell: CellData) -> str:
 
 
 # * Header detection
+
 
 def detect_header_row(sheet: SheetData) -> int | None:
     """Estimate the header row number (1-indexed).
@@ -87,9 +89,9 @@ def detect_header_row(sheet: SheetData) -> int | None:
             continue
 
         string_count = sum(
-            1 for c in non_empty
-            if c.data_type in ("s", "str", "inlineStr")
-            or isinstance(c.display_value, str)
+            1
+            for c in non_empty
+            if c.data_type in ("s", "str", "inlineStr") or isinstance(c.display_value, str)
         )
         score = string_count / len(non_empty)
 
@@ -160,7 +162,8 @@ def build_multi_row_headers(
 
             # ^ Cell missing or empty — check merge lookup for origin
             origin = (
-                cell.merge_origin if (cell is not None and cell.merge_origin is not None)
+                cell.merge_origin
+                if (cell is not None and cell.merge_origin is not None)
                 else merge_lookup.get((row_num, col))
             )
             if origin is not None:
@@ -219,10 +222,9 @@ def encode_raw_rows(sheet: SheetData, max_rows: int = 30) -> str:
     capped_rows = min(max_rows, sheet.row_count)
 
     # ^ Determine active columns
-    active_cols: list[int] = sorted({
-        c.col for c in sheet.cells
-        if c.display_value is not None and c.row <= capped_rows
-    })
+    active_cols: list[int] = sorted(
+        {c.col for c in sheet.cells if c.display_value is not None and c.row <= capped_rows}
+    )
     if not active_cols:
         parts.append("\n(empty sheet)")
         return "\n".join(parts)
@@ -258,6 +260,7 @@ def encode_raw_rows(sheet: SheetData, max_rows: int = 30) -> str:
 
 # * Merged cell formatting
 
+
 def format_merged_regions(sheet: SheetData) -> list[str]:
     """Format merged regions as 'A1:C1 = "Header Text"' strings."""
     results: list[str] = []
@@ -283,6 +286,7 @@ def format_merged_regions(sheet: SheetData) -> list[str]:
 
 # * Formula summary
 
+
 def summarize_formulas(sheet: SheetData) -> list[str]:
     """Summarize formula cells, compressing repeated patterns.
 
@@ -301,7 +305,7 @@ def summarize_formulas(sheet: SheetData) -> list[str]:
         if len(cells) <= 2:
             # ^ Few formulas: list individually
             for c in cells:
-                results.append(f"{col_letter}{c.row}=\"{c.formula}\"")
+                results.append(f'{col_letter}{c.row}="{c.formula}"')
             continue
 
         # ^ Try to detect a pattern by replacing the row number
@@ -317,7 +321,7 @@ def summarize_formulas(sheet: SheetData) -> list[str]:
         else:
             # ^ Mixed patterns: list individually
             for c in cells:
-                results.append(f"{col_letter}{c.row}=\"{c.formula}\"")
+                results.append(f'{col_letter}{c.row}="{c.formula}"')
 
     return results
 
@@ -335,6 +339,7 @@ def _generalize_formula(formula: str, row: int) -> str:
 
 # * Empty row/column detection
 
+
 def find_empty_rows(sheet: SheetData) -> set[int]:
     """Find row numbers that are completely empty."""
     non_empty_rows: set[int] = set()
@@ -346,6 +351,7 @@ def find_empty_rows(sheet: SheetData) -> set[int]:
 
 
 # * Column type summary
+
 
 def summarize_column_types(
     sheet: SheetData,
@@ -395,6 +401,7 @@ def summarize_column_types(
 
 
 # * Internal helpers
+
 
 def _col_letter_to_num(letter: str) -> int:
     """Convert column letter (A, B, ..., Z, AA, ...) to 1-based number."""

@@ -32,8 +32,7 @@ AZURITE_CONN_STR = (
 # ^ https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key
 AZURITE_ACCOUNT_NAME = "devstoreaccount1"
 AZURITE_ACCOUNT_KEY = (
-    "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsu"
-    "Fq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+    "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 )
 AZURITE_CONTAINER = "test-container"
 
@@ -42,6 +41,7 @@ FAKE_GCS_BUCKET = "test-bucket"
 
 
 # * Sample xlsx data
+
 
 @pytest.fixture(scope="session")
 def sample_xlsx_bytes() -> bytes:
@@ -61,6 +61,7 @@ def sample_xlsx_bytes() -> bytes:
 
 
 # * Docker Compose lifecycle
+
 
 def _is_compose_running() -> bool:
     """Check if all compose services are healthy."""
@@ -91,6 +92,7 @@ def _ensure_compose_up():
 
 
 # * Per-provider setup fixtures
+
 
 @pytest.fixture(scope="session")
 def s3_setup(sample_xlsx_bytes: bytes):
@@ -138,6 +140,8 @@ def gcs_setup(sample_xlsx_bytes: bytes):
         f"{FAKE_GCS_ENDPOINT}/upload/storage/v1/b/{FAKE_GCS_BUCKET}/o"
         f"?uploadType=media&name=test.xlsx"
     )
-    requests.post(upload_url, data=sample_xlsx_bytes, headers={"Content-Type": "application/octet-stream"})
+    requests.post(
+        upload_url, data=sample_xlsx_bytes, headers={"Content-Type": "application/octet-stream"}
+    )
 
     return f"gs://{FAKE_GCS_BUCKET}/test.xlsx"

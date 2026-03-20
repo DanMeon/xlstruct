@@ -14,6 +14,7 @@ from xlstruct.schemas.usage import TokenUsage
 
 # * Test schemas
 
+
 class Product(BaseModel):
     name: str
     price: float
@@ -21,6 +22,7 @@ class Product(BaseModel):
 
 
 # * Fixtures
+
 
 @pytest.fixture(autouse=True)
 def _mock_instructor():
@@ -86,6 +88,7 @@ def multi_sheet_xlsx_file(tmp_path) -> str:
 
 # * Tests
 
+
 class TestExtractorInit:
     def test_default_init(self):
         extractor = Extractor()
@@ -131,9 +134,7 @@ class TestExtractorExtract:
         extractor = Extractor()
         with patch.object(extractor._engine, "extract", new_callable=AsyncMock) as mock_extract:
             mock_extract.return_value = []
-            await extractor.extract(
-                product_xlsx_file, Product, instructions="Extract all products"
-            )
+            await extractor.extract(product_xlsx_file, Product, instructions="Extract all products")
 
         # ^ Verify instructions argument was passed
         call_args = mock_extract.call_args
@@ -148,6 +149,7 @@ class TestExtractorExtract:
             await extractor.extract(multi_sheet_xlsx_file, Product, sheet="Sheet2")
 
         mock_extract.assert_called_once()
+
 
 class TestExtractorExtractSync:
     def test_extract_sync(self, product_xlsx_file):
@@ -188,7 +190,6 @@ class TestExtractorPipeline:
         mock_extract.assert_called_once()
 
 
-
 class TestExtractionResult:
     @pytest.fixture
     def _empty_report(self) -> ExtractionReport:
@@ -213,9 +214,7 @@ class TestExtractionResult:
     def test_report_source_rows_set(self):
         """report.source_rows can be set explicitly."""
         rows = [[2], [3], [4, 5]]
-        report = ExtractionReport(
-            mode=ExtractionMode.DIRECT, usage=TokenUsage(), source_rows=rows
-        )
+        report = ExtractionReport(mode=ExtractionMode.DIRECT, usage=TokenUsage(), source_rows=rows)
         result = ExtractionResult([], report=report)
         assert result.report.source_rows == [[2], [3], [4, 5]]
 
@@ -258,9 +257,7 @@ class TestExtractionResult:
 
     def test_to_dataframe_import_error(self, _empty_report):
         """to_dataframe() raises ImportError when pandas is missing."""
-        result = ExtractionResult(
-            [Product(name="A", price=1.0, stock=1)], report=_empty_report
-        )
+        result = ExtractionResult([Product(name="A", price=1.0, stock=1)], report=_empty_report)
         with patch.dict("sys.modules", {"pandas": None}):
             with pytest.raises(ImportError, match="pandas is required"):
                 result.to_dataframe()

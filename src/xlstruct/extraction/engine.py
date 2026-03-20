@@ -94,9 +94,7 @@ class ExtractionEngine:
             ) from e
 
     @staticmethod
-    def _split_provenance(
-        items: list[BaseModel], original_schema: type[T]
-    ) -> list[T]:
+    def _split_provenance(items: list[BaseModel], original_schema: type[T]) -> list[T]:
         """Strip source_rows from wrapper records, rebuild as original schema.
 
         Stores source_rows on each record as _source_rows attribute for

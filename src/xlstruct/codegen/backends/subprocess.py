@@ -10,22 +10,24 @@ from pathlib import Path as PathLibPath
 logger = logging.getLogger(__name__)
 
 # ^ Whitelist approach: only these env vars are passed to the subprocess
-ALLOWED_ENV_KEYS = frozenset({
-    "PATH",
-    "HOME",
-    "USER",
-    "LANG",
-    "LC_ALL",
-    "LC_CTYPE",
-    "TERM",
-    "PYTHONPATH",
-    "PYTHONHASHSEED",
-    "VIRTUAL_ENV",
-    "UV_CACHE_DIR",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-})
+ALLOWED_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "PYTHONPATH",
+        "PYTHONHASHSEED",
+        "VIRTUAL_ENV",
+        "UV_CACHE_DIR",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+    }
+)
 
 
 def _build_safe_env() -> dict[str, str]:
@@ -34,10 +36,7 @@ def _build_safe_env() -> dict[str, str]:
     Only explicitly allowed env vars are passed to the subprocess.
     This prevents leaking credentials, tokens, and other secrets.
     """
-    return {
-        k: v for k, v in os.environ.items()
-        if k in ALLOWED_ENV_KEYS
-    }
+    return {k: v for k, v in os.environ.items() if k in ALLOWED_ENV_KEYS}
 
 
 def _apply_resource_limits() -> None:

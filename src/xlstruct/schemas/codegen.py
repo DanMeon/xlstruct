@@ -69,9 +69,7 @@ class GeneratedScript(BaseModel):
     """LLM-generated transformation script."""
 
     code: str = Field(description="Complete standalone Python script")
-    explanation: str = Field(
-        description="Brief explanation of the transformation logic"
-    )
+    explanation: str = Field(description="Brief explanation of the transformation logic")
 
 
 class CodegenAttempt(BaseModel):

@@ -13,12 +13,14 @@ from xlstruct.schemas.usage import TokenUsage
 
 # * Test schemas
 
+
 class Product(BaseModel):
     name: str
     price: float
 
 
 # * Fixtures
+
 
 @pytest.fixture(autouse=True)
 def _mock_instructor():
@@ -58,6 +60,7 @@ def xlsx_files(tmp_path) -> list[str]:
 
 # * Model tests
 
+
 class TestBatchResultModel:
     def test_empty_batch(self):
         result = BatchResult(results=[])
@@ -68,25 +71,31 @@ class TestBatchResultModel:
         assert result.all_records == []
 
     def test_mixed_results(self):
-        results = BatchResult[Product](results=[
-            FileResult(
-                source="a.xlsx",
-                success=True,
-                records=[Product(name="Apple", price=1.5)],
-                usage=TokenUsage(llm_calls=1, input_tokens=100, output_tokens=50, total_tokens=150),
-            ),
-            FileResult(
-                source="b.xlsx",
-                success=False,
-                error="FileNotFoundError: b.xlsx",
-            ),
-            FileResult(
-                source="c.xlsx",
-                success=True,
-                records=[Product(name="Cherry", price=3.0), Product(name="Date", price=4.0)],
-                usage=TokenUsage(llm_calls=1, input_tokens=120, output_tokens=60, total_tokens=180),
-            ),
-        ])
+        results = BatchResult[Product](
+            results=[
+                FileResult(
+                    source="a.xlsx",
+                    success=True,
+                    records=[Product(name="Apple", price=1.5)],
+                    usage=TokenUsage(
+                        llm_calls=1, input_tokens=100, output_tokens=50, total_tokens=150
+                    ),
+                ),
+                FileResult(
+                    source="b.xlsx",
+                    success=False,
+                    error="FileNotFoundError: b.xlsx",
+                ),
+                FileResult(
+                    source="c.xlsx",
+                    success=True,
+                    records=[Product(name="Cherry", price=3.0), Product(name="Date", price=4.0)],
+                    usage=TokenUsage(
+                        llm_calls=1, input_tokens=120, output_tokens=60, total_tokens=180
+                    ),
+                ),
+            ]
+        )
 
         assert results.succeeded == 2
         assert results.failed == 1
@@ -94,26 +103,36 @@ class TestBatchResultModel:
         assert len(results) == 3
 
     def test_total_usage_aggregation(self):
-        results = BatchResult[Product](results=[
-            FileResult(
-                source="a.xlsx",
-                success=True,
-                records=[],
-                usage=TokenUsage(
-                    llm_calls=1, input_tokens=100, output_tokens=50,
-                    total_tokens=150, cache_creation_tokens=10, cache_read_tokens=5,
+        results = BatchResult[Product](
+            results=[
+                FileResult(
+                    source="a.xlsx",
+                    success=True,
+                    records=[],
+                    usage=TokenUsage(
+                        llm_calls=1,
+                        input_tokens=100,
+                        output_tokens=50,
+                        total_tokens=150,
+                        cache_creation_tokens=10,
+                        cache_read_tokens=5,
+                    ),
                 ),
-            ),
-            FileResult(
-                source="b.xlsx",
-                success=True,
-                records=[],
-                usage=TokenUsage(
-                    llm_calls=2, input_tokens=200, output_tokens=80,
-                    total_tokens=280, cache_creation_tokens=0, cache_read_tokens=20,
+                FileResult(
+                    source="b.xlsx",
+                    success=True,
+                    records=[],
+                    usage=TokenUsage(
+                        llm_calls=2,
+                        input_tokens=200,
+                        output_tokens=80,
+                        total_tokens=280,
+                        cache_creation_tokens=0,
+                        cache_read_tokens=20,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
 
         usage = results.total_usage
         assert usage.llm_calls == 3
@@ -125,31 +144,37 @@ class TestBatchResultModel:
 
     def test_total_usage_skips_none(self):
         """Failed files with no usage should not break aggregation."""
-        results = BatchResult[Product](results=[
-            FileResult(source="a.xlsx", success=False, error="err"),
-            FileResult(
-                source="b.xlsx",
-                success=True,
-                records=[],
-                usage=TokenUsage(llm_calls=1, input_tokens=50, output_tokens=25, total_tokens=75),
-            ),
-        ])
+        results = BatchResult[Product](
+            results=[
+                FileResult(source="a.xlsx", success=False, error="err"),
+                FileResult(
+                    source="b.xlsx",
+                    success=True,
+                    records=[],
+                    usage=TokenUsage(
+                        llm_calls=1, input_tokens=50, output_tokens=25, total_tokens=75
+                    ),
+                ),
+            ]
+        )
         assert results.total_usage.llm_calls == 1
 
     def test_all_records(self):
-        results = BatchResult[Product](results=[
-            FileResult(
-                source="a.xlsx",
-                success=True,
-                records=[Product(name="Apple", price=1.5)],
-            ),
-            FileResult(source="b.xlsx", success=False, error="err"),
-            FileResult(
-                source="c.xlsx",
-                success=True,
-                records=[Product(name="Cherry", price=3.0), Product(name="Date", price=4.0)],
-            ),
-        ])
+        results = BatchResult[Product](
+            results=[
+                FileResult(
+                    source="a.xlsx",
+                    success=True,
+                    records=[Product(name="Apple", price=1.5)],
+                ),
+                FileResult(source="b.xlsx", success=False, error="err"),
+                FileResult(
+                    source="c.xlsx",
+                    success=True,
+                    records=[Product(name="Cherry", price=3.0), Product(name="Date", price=4.0)],
+                ),
+            ]
+        )
 
         all_records = results.all_records
         assert len(all_records) == 3
@@ -157,23 +182,28 @@ class TestBatchResultModel:
         assert all_records[2].name == "Date"
 
     def test_iteration(self):
-        results = BatchResult[Product](results=[
-            FileResult(source="a.xlsx", success=True, records=[]),
-            FileResult(source="b.xlsx", success=True, records=[]),
-        ])
+        results = BatchResult[Product](
+            results=[
+                FileResult(source="a.xlsx", success=True, records=[]),
+                FileResult(source="b.xlsx", success=True, records=[]),
+            ]
+        )
         sources = [r.source for r in results]
         assert sources == ["a.xlsx", "b.xlsx"]
 
     def test_indexing(self):
-        results = BatchResult[Product](results=[
-            FileResult(source="a.xlsx", success=True, records=[]),
-            FileResult(source="b.xlsx", success=True, records=[]),
-        ])
+        results = BatchResult[Product](
+            results=[
+                FileResult(source="a.xlsx", success=True, records=[]),
+                FileResult(source="b.xlsx", success=True, records=[]),
+            ]
+        )
         assert results[0].source == "a.xlsx"
         assert results[1].source == "b.xlsx"
 
 
 # * Extractor integration tests
+
 
 class TestExtractBatch:
     async def test_batch_all_succeed(self, xlsx_files):

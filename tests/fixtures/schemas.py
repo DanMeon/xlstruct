@@ -17,6 +17,7 @@ from xlstruct.config import ExtractionConfig
 # * Tier 1 — Baseline
 # * ──────────────────────────────────────────────────────────────────────
 
+
 class Employee(BaseModel):
     """simple_employee_directory.xlsx — 30 rows, flat table."""
 
@@ -78,6 +79,7 @@ STUDENT_GRADE_CONFIG = ExtractionConfig(
 # * Tier 2 — Moderate
 # * ──────────────────────────────────────────────────────────────────────
 
+
 class Transaction(BaseModel):
     """large_transaction_log.xlsx — 200 rows, tests chunking.
 
@@ -87,7 +89,9 @@ class Transaction(BaseModel):
     txn_id: str = Field(description="e.g. TXN-10001")
     date: str = Field(description="YYYY-MM-DD")
     customer_name: str
-    category: str = Field(description="Electronics, Peripherals, Furniture, Accessories, or Office Supplies")
+    category: str = Field(
+        description="Electronics, Peripherals, Furniture, Accessories, or Office Supplies"
+    )
     description: str = Field(description="Product name")
     amount: float
     payment_method: str
@@ -149,6 +153,7 @@ BUDGET_CONFIG = ExtractionConfig(
 # * ──────────────────────────────────────────────────────────────────────
 # * Tier 3 — Hard
 # * ──────────────────────────────────────────────────────────────────────
+
 
 class FinancialLineItem(BaseModel):
     """merged_financial_report.xlsx — 2-level merged headers.
@@ -232,6 +237,7 @@ ORDER_CONFIG = ExtractionConfig(
 # * Tier 4 — Expert
 # * ──────────────────────────────────────────────────────────────────────
 
+
 class RegionalProductSales(BaseModel):
     """multi_level_header_sales.xlsm — 3-level merged headers.
 
@@ -269,9 +275,13 @@ class OrgMember(BaseModel):
     The LLM must 'fill down' the merged values to each row.
     """
 
-    department: str = Field(description="From vertically merged cells: Engineering, Sales, or Marketing")
+    department: str = Field(
+        description="From vertically merged cells: Engineering, Sales, or Marketing"
+    )
     team: str = Field(description="From vertically merged cells, e.g. Platform, Product, Data")
-    sub_team: str = Field(description="From vertically merged cells, e.g. Backend, Frontend, ML Engineering")
+    sub_team: str = Field(
+        description="From vertically merged cells, e.g. Backend, Frontend, ML Engineering"
+    )
     employee_id: str
     name: str
     title: str
@@ -301,10 +311,14 @@ class ProductMonthlySales(BaseModel):
     The LLM must unpivot into one record per product-month with a sale.
     """
 
-    category: str = Field(description="From vertically merged cells: Hardware, Software, Networking, or Services")
+    category: str = Field(
+        description="From vertically merged cells: Hardware, Software, Networking, or Services"
+    )
     product: str
     month: str = Field(description="3-letter abbreviation: Jan, Feb, ..., Dec")
-    units_sold: int = Field(description="Number of units sold; only include months with actual data")
+    units_sold: int = Field(
+        description="Number of units sold; only include months with actual data"
+    )
 
 
 PIVOT_SALES_CONFIG = ExtractionConfig(

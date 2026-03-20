@@ -15,6 +15,7 @@ from xlstruct.schemas.core import CellData, SheetData
 
 # * Test schemas
 
+
 class Invoice(BaseModel):
     customer: str
     amount: float
@@ -27,6 +28,7 @@ class Order(BaseModel):
 
 
 # * Fixtures
+
 
 @pytest.fixture
 def sample_sheet() -> SheetData:
@@ -60,6 +62,7 @@ def cache(tmp_path) -> ScriptCache:
 
 
 # * Signature tests
+
 
 class TestComputeStructureSignature:
     def test_deterministic(self, sample_sheet):
@@ -97,14 +100,18 @@ class TestComputeStructureSignature:
     def test_different_header_values_different_signature(self):
         """Different header cell values → different signature."""
         sheet_a = SheetData(
-            name="A", row_count=2, col_count=2,
+            name="A",
+            row_count=2,
+            col_count=2,
             cells=[
                 CellData(row=1, col=1, value="Name"),
                 CellData(row=1, col=2, value="Price"),
             ],
         )
         sheet_b = SheetData(
-            name="B", row_count=2, col_count=2,
+            name="B",
+            row_count=2,
+            col_count=2,
             cells=[
                 CellData(row=1, col=1, value="Product"),
                 CellData(row=1, col=2, value="Cost"),
@@ -116,6 +123,7 @@ class TestComputeStructureSignature:
 
 
 # * ScriptCache tests
+
 
 class TestScriptCache:
     def test_get_miss(self, cache):

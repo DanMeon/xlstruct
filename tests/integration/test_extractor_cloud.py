@@ -25,6 +25,7 @@ from .conftest import (
 
 # * Test schema
 
+
 class Product(BaseModel):
     name: str
     price: float
@@ -38,6 +39,7 @@ EXPECTED = [
 
 # * Helper
 
+
 def _make_extractor() -> Extractor:
     """Create Extractor with mocked LLM client."""
     with patch(
@@ -48,6 +50,7 @@ def _make_extractor() -> Extractor:
 
 
 # * S3 (MinIO)
+
 
 class TestS3Extractor:
     async def test_extract_from_s3(self, s3_setup: str):
@@ -86,6 +89,7 @@ class TestS3Extractor:
 
 
 # * Azure Blob (Azurite)
+
 
 class TestAzureExtractor:
     async def test_extract_from_azure(self, azure_setup: str):
@@ -131,6 +135,7 @@ class TestAzureExtractor:
 
 
 # * GCS (fake-gcs-server)
+
 
 class TestGCSExtractor:
     async def test_extract_from_gcs(self, gcs_setup: str):

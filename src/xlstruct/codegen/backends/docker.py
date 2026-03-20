@@ -65,7 +65,8 @@ class _ContainerConfig(BaseModel):
     Image: str = Field(description="Docker image name")
     Cmd: list[str] = Field(description="Command to execute in the container")
     WorkingDir: str = Field(
-        default="/workspace", description="Working directory inside the container",
+        default="/workspace",
+        description="Working directory inside the container",
     )
     NetworkDisabled: bool = Field(default=True, description="Disable network access for isolation")
     HostConfig: _HostConfig = Field(description="Host-level resource constraints")
@@ -137,7 +138,10 @@ class DockerBackend:
             install_config = _ContainerConfig(
                 Image=self._image,
                 Cmd=[
-                    "pip", "install", "-q", *DOCKER_PIP_PACKAGES,
+                    "pip",
+                    "install",
+                    "-q",
+                    *DOCKER_PIP_PACKAGES,
                 ],
                 NetworkDisabled=False,
                 HostConfig=_HostConfig(
@@ -202,7 +206,9 @@ class DockerBackend:
             container_config = _ContainerConfig(
                 Image=self._ready_image,
                 Cmd=[
-                    "python", "/workspace/script.py", f"/workspace/{source.name}",
+                    "python",
+                    "/workspace/script.py",
+                    f"/workspace/{source.name}",
                 ],
                 NetworkDisabled=self._network_disabled,
                 HostConfig=_HostConfig(
@@ -229,7 +235,8 @@ class DockerBackend:
 
                 try:
                     exit_info = await asyncio.wait_for(
-                        container.wait(), timeout=timeout,
+                        container.wait(),
+                        timeout=timeout,
                     )
                     exit_code: int = exit_info["StatusCode"]
                 except TimeoutError:

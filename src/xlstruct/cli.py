@@ -68,9 +68,7 @@ def extract(
     )
 
     # ^ CLI runs in sync context
-    results: list[Any] = extractor.extract_sync(
-        source, extraction_config=extraction_config
-    )
+    results: list[Any] = extractor.extract_sync(source, extraction_config=extraction_config)
 
     output_json = json.dumps(
         [r.model_dump() for r in results],

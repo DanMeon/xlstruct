@@ -73,9 +73,7 @@ class ScriptValidator:
             )
 
         # * Execute via backend
-        exit_code, stdout, stderr = await self._backend.execute(
-            code, source_path, self._timeout
-        )
+        exit_code, stdout, stderr = await self._backend.execute(code, source_path, self._timeout)
 
         # * Handle timeout
         if exit_code == -1:
@@ -94,7 +92,8 @@ class ScriptValidator:
             # * Validate stdout JSON against schema
             if output_schema is not None:
                 schema_error = self._validate_output(
-                    stdout, output_schema,
+                    stdout,
+                    output_schema,
                     total_data_rows=total_data_rows,
                 )
                 if schema_error:
@@ -139,26 +138,23 @@ class ScriptValidator:
         if not isinstance(data, list) or not data:
             return stdout
 
-        required = [
-            name for name, field in schema.model_fields.items()
-            if field.is_required()
-        ]
+        required = [name for name, field in schema.model_fields.items() if field.is_required()]
         if not required:
             return stdout
 
         original_count = len(data)
         filtered = [
-            record for record in data
-            if all(
-                record.get(f) is not None and record.get(f) != ""
-                for f in required
-            )
+            record
+            for record in data
+            if all(record.get(f) is not None and record.get(f) != "" for f in required)
         ]
 
         if len(filtered) < original_count:
             logger.info(
                 "Post-filter: %d → %d records (removed %d with null required fields)",
-                original_count, len(filtered), original_count - len(filtered),
+                original_count,
+                len(filtered),
+                original_count - len(filtered),
             )
 
         return json.dumps(filtered, ensure_ascii=False, indent=2, default=str)
@@ -254,9 +250,7 @@ class ScriptValidator:
         return ""
 
     @staticmethod
-    def _extract_traceback(
-        stderr: str, max_lines: int = 50, max_chars: int = 4000
-    ) -> str:
+    def _extract_traceback(stderr: str, max_lines: int = 50, max_chars: int = 4000) -> str:
         """Extract and truncate the meaningful traceback from stderr.
 
         Keeps the last N lines (Python tracebacks end with the error message)

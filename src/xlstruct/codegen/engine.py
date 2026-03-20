@@ -87,13 +87,9 @@ class CodegenEngine:
                 self._tracker.record(label, completion)
             return result  # type: ignore[no-any-return]
         except Exception as e:
-            raise ExtractionError(
-                f"{error_msg}: {e}", code=ErrorCode.EXTRACTION_LLM_FAILED
-            ) from e
+            raise ExtractionError(f"{error_msg}: {e}", code=ErrorCode.EXTRACTION_LLM_FAILED) from e
 
-    def _build_messages(
-        self, system_prompt: str, user_prompt: str
-    ) -> list[dict[str, Any]]:
+    def _build_messages(self, system_prompt: str, user_prompt: str) -> list[dict[str, Any]]:
         """Build and cache-control messages for an LLM call."""
         return apply_cache_control(
             [
@@ -123,9 +119,7 @@ class CodegenEngine:
     ) -> MappingPlan:
         """Analyze spreadsheet structure and produce a column mapping plan."""
         messages = self._build_messages(system_prompt, prompt)
-        return await self._call_llm(
-            MappingPlan, messages, "analyzer", "Structure analysis failed"
-        )
+        return await self._call_llm(MappingPlan, messages, "analyzer", "Structure analysis failed")
 
     async def generate(
         self,

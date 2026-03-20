@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: uv sync --group dev --all-extras
+      - name: Ruff format
+        run: uv run ruff format --check src/ tests/
       - name: Ruff lint
         run: uv run ruff check src/ tests/
       - name: Mypy
@@ -28,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

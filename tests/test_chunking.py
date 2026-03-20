@@ -5,6 +5,7 @@ from xlstruct.schemas.core import CellData, SheetData
 
 # * Fixtures
 
+
 def _make_small_sheet() -> SheetData:
     """5 data rows with header — well under any reasonable token budget."""
     cells = [
@@ -45,6 +46,7 @@ def _make_large_sheet(data_rows: int) -> SheetData:
 
 # * needs_chunking
 
+
 class TestNeedsChunking:
     def test_small_sheet_returns_false(self):
         sheet = _make_small_sheet()
@@ -73,6 +75,7 @@ class TestNeedsChunking:
 
 
 # * ChunkSplitter.split
+
 
 class TestChunkSplitterSplit:
     def test_empty_sheet_returns_single_item_list(self):
@@ -113,9 +116,7 @@ class TestChunkSplitterSplit:
         chunks = splitter.split(sheet, token_budget=500_000)
         for chunk in chunks:
             # ^ Name must follow pattern "Large (rows X-Y)"
-            assert "rows" in chunk.name, (
-                f"Chunk name '{chunk.name}' does not contain row range"
-            )
+            assert "rows" in chunk.name, f"Chunk name '{chunk.name}' does not contain row range"
 
     def test_header_cells_duplicated_in_each_chunk(self):
         sheet = _make_large_sheet(250)

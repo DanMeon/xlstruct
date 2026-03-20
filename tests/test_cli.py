@@ -82,10 +82,14 @@ class TestExtractCommand:
                 return_value=MagicMock(),
             ),
         ):
-            result = runner.invoke(app, [
-                str(xlsx_path),
-                "--schema", "schema:Item",
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    str(xlsx_path),
+                    "--schema",
+                    "schema:Item",
+                ],
+            )
 
         assert result.exit_code == 0, result.output
         output = json.loads(result.output)
@@ -105,9 +109,7 @@ class TestExtractCommand:
         # ^ Schema module
         schema_file = tmp_path / "s.py"
         schema_file.write_text(
-            "from pydantic import BaseModel\n\n"
-            "class Row(BaseModel):\n"
-            "    x: int\n"
+            "from pydantic import BaseModel\n\nclass Row(BaseModel):\n    x: int\n"
         )
 
         # ^ Dummy xlsx
@@ -134,11 +136,16 @@ class TestExtractCommand:
                 return_value=MagicMock(),
             ),
         ):
-            result = runner.invoke(app, [
-                str(xlsx_path),
-                "--schema", "s:Row",
-                "--output", str(output_path),
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    str(xlsx_path),
+                    "--schema",
+                    "s:Row",
+                    "--output",
+                    str(output_path),
+                ],
+            )
 
         assert result.exit_code == 0, result.output
         assert output_path.exists()

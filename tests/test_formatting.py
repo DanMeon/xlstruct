@@ -45,7 +45,6 @@ class TestFormatCellValue:
         assert format_cell_value(cell) == "100"
 
 
-
 class TestDetectHeaderRow:
     def test_simple_sheet(self, simple_sheet: SheetData):
         row = detect_header_row(simple_sheet)

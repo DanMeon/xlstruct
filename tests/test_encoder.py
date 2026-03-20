@@ -50,9 +50,9 @@ class TestCompressedEncoderSampled:
 
         assert "sample 10 of" in result
         # ^ Should have head + tail sampling
-        assert "row2" in result   # ^ head
+        assert "row2" in result  # ^ head
         assert "row51" in result  # ^ tail
-        assert "..." in result    # ^ gap indicator
+        assert "..." in result  # ^ gap indicator
 
     def test_no_sample_when_fewer_rows(self, simple_sheet: SheetData):
         encoder = CompressedEncoder(sample_size=100)

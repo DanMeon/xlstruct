@@ -34,9 +34,7 @@ async def read_file(source: str, **storage_options: Any) -> bytes:
         # ^ fsspec is sync-only for most backends; to_thread is safest async pattern
         return await asyncio.to_thread(_sync_read)
     except FileNotFoundError as e:
-        raise StorageError(
-            f"File not found: {source}", code=ErrorCode.STORAGE_NOT_FOUND
-        ) from e
+        raise StorageError(f"File not found: {source}", code=ErrorCode.STORAGE_NOT_FOUND) from e
     except PermissionError as e:
         raise StorageError(
             f"Permission denied: {source}", code=ErrorCode.STORAGE_PERMISSION_DENIED
