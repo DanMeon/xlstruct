@@ -22,12 +22,17 @@ Excel File + Pydantic Schema  →  LLM  →  Validated Structured Data
 - **Any Excel layout** — Flat tables, merged cells, multi-level headers, form+table hybrids — handled by a single API
 - **Two extraction modes** — Direct LLM extraction for small sheets; code generation for large ones. Auto-routed by sheet size, or choose manually.
 - **Reusable scripts** — Codegen mode produces a standalone Python script. Run it without LLM calls — pay for generation once, use forever.
+- **Script caching** — Generated scripts are cached by sheet structure signature. Same layout = instant reuse, no LLM call.
 - **Schema suggestion** — `suggest_schema()` analyzes a spreadsheet and generates a Pydantic model for you
+- **Extraction report** — Every extraction returns an `ExtractionReport` with mode used, token usage, and optional row provenance
+- **Row provenance** — Track which Excel row each record came from. Enable with `track_provenance=True`.
+- **DataFrame export** — `result.to_dataframe()` converts results to pandas DataFrame (optional dependency)
+- **Multi-sheet extraction** — `extract_workbook()` extracts different schemas from different sheets in parallel
+- **Batch extraction** — `extract_batch()` processes multiple files in parallel with configurable concurrency
 - **Fast hybrid reader** — calamine (Rust) for speed + openpyxl for formula extraction. Both passes in one call.
-- **Token usage tracking** — Every extraction returns token counts, per-call breakdown, and prompt cache hit metrics
+- **Token-aware encoding** — Compressed markdown encoding with head+tail sampling. Auto-chunks large sheets to fit within token budget.
 - **Prompt caching** — Anthropic cache_control markers applied automatically; OpenAI cached_tokens tracked
-- **Token-aware encoding** — Auto-selects encoding strategy (markdown vs compressed) and chunks large sheets to fit within token budget
-- **Sandboxed execution** — Generated scripts run in a subprocess with blocked imports (network, subprocess) and stripped credentials
+- **Sandboxed execution** — Generated scripts run in a subprocess with blocked imports (network, subprocess) and stripped credentials. Optional Docker backend for OS-level isolation.
 - **Multi-provider LLM** — OpenAI, Anthropic, Gemini via [Instructor](https://github.com/jxnl/instructor)
 - **Cloud storage** — Read from S3, Azure Blob, GCS via fsspec
 - **Async-first** — Async API with sync convenience wrappers. Jupyter-compatible via nest_asyncio.
@@ -50,6 +55,12 @@ pip install "xlstruct[gemini]"
 pip install "xlstruct[s3]"        # AWS S3
 pip install "xlstruct[azure]"     # Azure Blob Storage
 pip install "xlstruct[gcs]"       # Google Cloud Storage
+
+# DataFrame support
+pip install "xlstruct[pandas]"
+
+# Docker sandbox
+pip install "xlstruct[docker]"
 
 # Everything
 pip install "xlstruct[all]"
@@ -99,16 +110,66 @@ asyncio.run(main())
 ### Fine-grained control with ExtractionConfig
 
 ```python
-from xlstruct import ExtractionConfig
+from xlstruct import ExtractionConfig, ExtractionMode
 
 config = ExtractionConfig(
     output_schema=InvoiceItem,
+    mode=ExtractionMode.DIRECT,
     sheet="Sheet1",
     header_rows=[1],
     instructions="Parse dates as YYYY-MM-DD. Skip empty rows.",
+    track_provenance=True,
 )
 
 results = extractor.extract_sync("invoice.xlsx", extraction_config=config)
+```
+
+### Extraction Report
+
+Every extraction returns an `ExtractionReport` via `result.report`:
+
+```python
+results = extractor.extract_sync("invoice.xlsx", schema=InvoiceItem)
+
+print(results.report)
+# ExtractionReport
+# ----------------------------------------
+# Mode:      direct
+# Tokens:    1,780 (input: 1,509 / output: 271)
+
+print(results.report.mode)          # ExtractionMode.DIRECT
+print(results.report.usage)         # TokenUsage(llm_calls=1, ...)
+```
+
+### Row Provenance
+
+Track which Excel row each record was extracted from:
+
+```python
+config = ExtractionConfig(
+    output_schema=InvoiceItem,
+    header_rows=[1],
+    track_provenance=True,
+)
+
+results = extractor.extract_sync("invoice.xlsx", extraction_config=config)
+
+for item, rows in zip(results, results.report.source_rows):
+    print(f"{item.description} ← Excel row {rows}")
+# Widget Alpha ← Excel row [2]
+# Widget Beta  ← Excel row [3]
+```
+
+### DataFrame Export
+
+```python
+pip install "xlstruct[pandas]"
+```
+
+```python
+results = extractor.extract_sync("invoice.xlsx", schema=InvoiceItem)
+df = results.to_dataframe()
+print(df)
 ```
 
 ### Schema Suggestion
@@ -134,20 +195,36 @@ Schema = extractor.suggest_schema_sync(
 )
 ```
 
-### Token Usage Tracking
+### Multi-Sheet Extraction
 
-Every extraction returns token usage details:
+Extract different schemas from different sheets in a single workbook:
 
 ```python
-results = extractor.extract_sync("invoice.xlsx", schema=InvoiceItem)
+results = extractor.extract_workbook_sync(
+    "report.xlsx",
+    sheet_schemas={
+        "Products": ProductSchema,
+        "Orders": OrderSchema,
+    },
+)
 
-print(results.usage.llm_calls)             # Number of LLM API calls
-print(results.usage.input_tokens)          # Total input tokens
-print(results.usage.output_tokens)         # Total output tokens
-print(results.usage.total_tokens)          # Sum
-print(results.usage.cache_creation_tokens) # Tokens written to prompt cache (Anthropic)
-print(results.usage.cache_read_tokens)     # Prompt cache hits (Anthropic + OpenAI)
-print(results.usage.breakdown)             # Per-call breakdown: [(label, in, out), ...]
+for sheet_name, sheet_result in results:
+    print(f"{sheet_name}: {len(sheet_result.records)} records")
+```
+
+### Batch Extraction
+
+Process multiple files in parallel:
+
+```python
+results = extractor.extract_batch_sync(
+    ["file1.xlsx", "file2.xlsx", "file3.xlsx"],
+    schema=InvoiceItem,
+    concurrency=5,
+)
+
+for file_result in results:
+    print(f"{file_result.source}: {len(file_result.records)} records")
 ```
 
 ### CSV Support
@@ -184,7 +261,6 @@ config = ExtractionConfig(
 1. **Header Detection** — Auto-detect header rows via lightweight LLM call
 2. **Phase 0 (Analyzer)** — LLM analyzes spreadsheet structure → `MappingPlan`
 3. **Phase 1 (Parser Agent)** — LLM generates openpyxl-based parsing script → validated via subprocess
-4. **Phase 2 (Transformer)** — Optional: adds data transformation rules
 
 Each phase includes self-correction — errors are fed back to the LLM (up to `max_codegen_retries`).
 
@@ -243,6 +319,8 @@ xlstruct extract report.xlsx \
 
 ### ExtractorConfig
 
+Instance-level configuration for the `Extractor`:
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `provider` | `"anthropic/claude-sonnet-4-6"` | LLM provider (`openai/gpt-4o`, `anthropic/claude-sonnet-4-6`, etc.) |
@@ -255,8 +333,23 @@ xlstruct extract report.xlsx \
 | `max_codegen_retries` | `3` | Self-correction attempts for code generation |
 | `codegen_timeout` | `60` | Script execution timeout in seconds |
 | `export_dir` | `None` | Directory to auto-save generated codegen scripts |
+| `cache_enabled` | `True` | Enable script caching for codegen mode |
+| `cache_dir` | `None` | Directory for script cache (default: `~/.xlstruct/cache/`) |
 | `provider_options` | `{}` | Provider-specific kwargs passed to `instructor.from_provider()` |
 | `storage_options` | `{}` | Storage backend options (S3 credentials, Azure keys, etc.) |
+
+### ExtractionConfig
+
+Per-extraction configuration:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `output_schema` | *(required)* | Pydantic model class defining the target structure |
+| `mode` | `"auto"` | Extraction mode: `auto`, `direct`, `codegen` |
+| `header_rows` | `None` | 1-indexed header row numbers (e.g. `[1, 2]`). `None` = auto-detect. |
+| `sheet` | `None` | Target sheet name. `None` = first sheet. |
+| `instructions` | `None` | Natural-language hints for the LLM |
+| `track_provenance` | `False` | When True, tracks source Excel row numbers per record |
 
 ```python
 from xlstruct import ExtractorConfig
@@ -265,6 +358,7 @@ config = ExtractorConfig(
     provider="openai/gpt-4o",
     temperature=0.0,
     token_budget=200_000,
+    cache_enabled=True,
 )
 extractor = Extractor(config=config)
 ```
@@ -292,14 +386,14 @@ extractor = Extractor(
 
 ```
 Direct:  Storage (fsspec) → Reader → CompressedEncoder → ExtractionEngine (Instructor) → ExtractionResult[T]
-Codegen: Storage (fsspec) → Reader → CodegenOrchestrator → [Header Detection → Analyzer → Parser → Transformer] → GeneratedScript
+Codegen: Storage (fsspec) → Reader → CodegenOrchestrator → [Header Detection → Analyzer → Parser] → GeneratedScript
 ```
 
 ### Module layout
 
 ```
 src/xlstruct/
-├── extractor.py          # Public API — Extractor class orchestrates everything
+├── extractor.py          # Public API — Extractor class, ExtractionResult
 ├── config.py             # ExtractorConfig, ExtractionConfig, ExtractionMode
 ├── storage.py            # fsspec-based file reading (local, s3://, az://, gs://)
 ├── exceptions.py         # Exception hierarchy
@@ -321,6 +415,7 @@ src/xlstruct/
 │   ├── engine.py         # CodegenEngine (LLM calls for codegen)
 │   ├── executor.py       # Security scanning (AST-based import/builtin checks)
 │   ├── validation.py     # ScriptValidator
+│   ├── cache.py          # ScriptCache (structure-signature-based caching)
 │   ├── schema_utils.py   # Pydantic schema → source code utilities
 │   └── backends/
 │       ├── base.py       # ExecutionBackend protocol
@@ -329,11 +424,15 @@ src/xlstruct/
 ├── schemas/
 │   ├── core.py           # SheetData, WorkbookData, CellData
 │   ├── codegen.py        # GeneratedScript, MappingPlan, CodegenAttempt
-│   └── usage.py          # TokenUsage, UsageTracker
+│   ├── report.py         # ExtractionReport
+│   ├── usage.py          # TokenUsage, UsageTracker
+│   ├── batch.py          # BatchResult, FileResult
+│   ├── workbook.py       # WorkbookResult, SheetResult
+│   └── suggest.py        # SuggestedFields (for suggest_schema)
 └── prompts/
     ├── system.py         # Shared system prompts
     ├── extraction.py     # Direct extraction prompts
-    └── codegen.py        # Codegen phase prompts (analyzer, parser, transformer)
+    └── codegen.py        # Codegen phase prompts (analyzer, parser)
 ```
 
 ### Reader
