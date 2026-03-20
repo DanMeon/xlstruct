@@ -41,7 +41,7 @@ EXPECTED = [
 def _make_extractor() -> Extractor:
     """Create Extractor with mocked LLM client."""
     with patch(
-        "xlstruct.extraction.engine.ExtractionEngine._build_client",
+        "xlstruct.extraction.engine.build_instructor_client",
         return_value=MagicMock(),
     ):
         return Extractor()

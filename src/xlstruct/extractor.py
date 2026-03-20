@@ -15,7 +15,14 @@ from pydantic import BaseModel, SecretStr
 from xlstruct.codegen.backends.base import ExecutionBackend
 from xlstruct.codegen.cache import ScriptCache, compute_structure_signature
 from xlstruct.codegen.orchestrator import CodegenOrchestrator
-from xlstruct.config import SAMPLE_ROWS, ExtractionConfig, ExtractionMode, ExtractorConfig
+from xlstruct.config import (
+    SAMPLE_ROWS,
+    ExtractionConfig,
+    ExtractionMode,
+    ExtractorConfig,
+    apply_cache_control,
+    build_instructor_client,
+)
 from xlstruct.encoder.compressed import CompressedEncoder
 from xlstruct.exceptions import ReaderError
 from xlstruct.extraction.chunking import ChunkSplitter, needs_chunking
@@ -281,21 +288,10 @@ class Extractor:
             f"Spreadsheet data:\n{encoded}"
         )
 
-        import instructor
-
-        from xlstruct.config import apply_cache_control, get_provider_kwargs
         from xlstruct.prompts.system import SYSTEM_PROMPT
         from xlstruct.schemas.suggest import SuggestedFields
 
-        kwargs = get_provider_kwargs(self._config)
-        if self._config.api_key:
-            kwargs["api_key"] = self._config.api_key.get_secret_value()
-
-        client = instructor.from_provider(
-            self._config.provider,
-            async_client=True,
-            **kwargs,
-        )
+        client = build_instructor_client(self._config)
 
         messages = apply_cache_control(
             [
@@ -306,7 +302,7 @@ class Extractor:
         )
         result, completion = await client.create_with_completion(
             response_model=SuggestedFields,
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
             temperature=0.0,
         )
         if self._tracker:

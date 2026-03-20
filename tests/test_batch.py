@@ -22,9 +22,9 @@ class Product(BaseModel):
 
 @pytest.fixture(autouse=True)
 def _mock_instructor():
-    """Mock ExtractionEngine._build_client to avoid real API calls."""
+    """Mock build_instructor_client to avoid real API calls."""
     with patch(
-        "xlstruct.extraction.engine.ExtractionEngine._build_client",
+        "xlstruct.extraction.engine.build_instructor_client",
         return_value=MagicMock(),
     ):
         yield

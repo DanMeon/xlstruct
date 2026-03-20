@@ -1,11 +1,10 @@
 """ExtractionEngine: Instructor-based async LLM extraction."""
 
-from typing import Any, TypeVar
+from typing import TypeVar
 
-import instructor
 from pydantic import BaseModel
 
-from xlstruct.config import ExtractorConfig, apply_cache_control, get_provider_kwargs
+from xlstruct.config import ExtractorConfig, apply_cache_control, build_instructor_client
 from xlstruct.exceptions import ExtractionError
 from xlstruct.prompts.extraction import build_extraction_prompt
 from xlstruct.prompts.system import SYSTEM_PROMPT
@@ -20,18 +19,7 @@ class ExtractionEngine:
     def __init__(self, config: ExtractorConfig, tracker: UsageTracker | None = None) -> None:
         self._config = config
         self._tracker = tracker
-        self._client = self._build_client()
-
-    def _build_client(self) -> Any:
-        """Create async Instructor client with provider-specific kwargs."""
-        kwargs = get_provider_kwargs(self._config)
-        if self._config.api_key:
-            kwargs["api_key"] = self._config.api_key.get_secret_value()
-        return instructor.from_provider(
-            self._config.provider,
-            async_client=True,
-            **kwargs,
-        )
+        self._client = build_instructor_client(config)
 
     async def extract(
         self,

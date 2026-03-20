@@ -78,7 +78,7 @@ class TestExtractCommand:
             patch("sys.path", [str(tmp_path)] + sys.path),
             patch("xlstruct.extractor.Extractor.extract_sync", return_value=mock_results),
             patch(
-                "xlstruct.extraction.engine.ExtractionEngine._build_client",
+                "xlstruct.extraction.engine.build_instructor_client",
                 return_value=MagicMock(),
             ),
         ):
@@ -130,7 +130,7 @@ class TestExtractCommand:
             patch("sys.path", [str(tmp_path)] + sys.path),
             patch("xlstruct.extractor.Extractor.extract_sync", return_value=mock_results),
             patch(
-                "xlstruct.extraction.engine.ExtractionEngine._build_client",
+                "xlstruct.extraction.engine.build_instructor_client",
                 return_value=MagicMock(),
             ),
         ):

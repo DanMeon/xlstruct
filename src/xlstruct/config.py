@@ -4,6 +4,7 @@ from enum import StrEnum
 from pathlib import Path as PathLibPath
 from typing import Any
 
+import instructor
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
@@ -169,3 +170,18 @@ def get_provider_kwargs(config: ExtractorConfig) -> dict[str, Any]:
 
     defaults.update(config.provider_options)
     return defaults
+
+
+def build_instructor_client(config: "ExtractorConfig") -> Any:
+    """Create async Instructor client with provider-specific kwargs.
+
+    Centralizes the common pattern: get_provider_kwargs → inject api_key → from_provider.
+    """
+    kwargs = get_provider_kwargs(config)
+    if config.api_key:
+        kwargs["api_key"] = config.api_key.get_secret_value()
+    return instructor.from_provider(
+        config.provider,
+        async_client=True,
+        **kwargs,
+    )
