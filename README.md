@@ -22,7 +22,9 @@ Excel File + Pydantic Schema  →  LLM  →  Validated Structured Data
 - **Any Excel layout** — Flat tables, merged cells, multi-level headers, form+table hybrids — handled by a single API
 - **Two extraction modes** — Direct LLM extraction for small sheets; code generation for large ones. Auto-routed by sheet size, or choose manually.
 - **Reusable scripts** — Codegen mode produces a standalone Python script. Run it without LLM calls — pay for generation once, use forever.
-- **Script caching** — Generated scripts are cached by sheet structure signature. Same layout = instant reuse, no LLM call.
+- **Script caching** — Generated scripts are cached by sheet structure signature. Same layout = instant reuse, no LLM call. Public cache API for listing, clearing, and removing entries.
+- **Progress tracking** — `on_progress` callback for `extract_batch()` and `extract_workbook()`. Integrates with tqdm or custom UIs.
+- **Error codes** — Every exception carries a machine-readable `ErrorCode` for programmatic error handling (`STORAGE_NOT_FOUND`, `CODEGEN_MAX_RETRIES`, etc.)
 - **Schema suggestion** — `suggest_schema()` analyzes a spreadsheet and generates a Pydantic model for you
 - **Extraction report** — Every extraction returns an `ExtractionReport` with mode used, token usage, and optional row provenance
 - **Row provenance** — Track which Excel row each record came from. Enable with `track_provenance=True`.
@@ -227,6 +229,33 @@ for file_result in results:
     print(f"{file_result.source}: {len(file_result.records)} records")
 ```
 
+#### Progress Tracking
+
+Monitor batch or workbook extraction with the `on_progress` callback:
+
+```python
+from xlstruct import ProgressEvent
+
+def on_progress(event: ProgressEvent):
+    print(f"[{event.completed}/{event.total}] {event.source}: {event.status}")
+
+results = extractor.extract_batch_sync(
+    files, schema=InvoiceItem, on_progress=on_progress,
+)
+```
+
+Works with tqdm:
+
+```python
+from tqdm import tqdm
+
+bar = tqdm(total=len(files))
+results = extractor.extract_batch_sync(
+    files, schema=InvoiceItem,
+    on_progress=lambda e: bar.update(1) if e.status != "started" else None,
+)
+```
+
 ### CSV Support
 
 CSV files work with the same API — no extra configuration needed:
@@ -270,6 +299,24 @@ Each phase includes self-correction — errors are fed back to the LLM (up to `m
 script = extractor.generate_script_sync("report.xlsx", config)
 print(script.code)          # Reusable Python script
 print(script.explanation)   # How it works
+```
+
+### Cache Management
+
+Inspect and manage the codegen script cache:
+
+```python
+extractor = Extractor(provider="openai/gpt-4o", cache_enabled=True)
+
+# List cached scripts
+for entry in extractor.cache.list_entries():
+    print(f"{entry.schema_name} | {entry.sheet_name} | {entry.created_at}")
+
+# Clear all cached scripts
+extractor.cache.clear()
+
+# Remove a specific entry by signature
+extractor.cache.remove("a1b2c3d4e5f6g7h8")
 ```
 
 ## Cloud Storage
@@ -428,6 +475,7 @@ src/xlstruct/
 │   ├── usage.py          # TokenUsage, UsageTracker
 │   ├── batch.py          # BatchResult, FileResult
 │   ├── workbook.py       # WorkbookResult, SheetResult
+│   ├── progress.py       # ProgressEvent, ProgressStatus
 │   └── suggest.py        # SuggestedFields (for suggest_schema)
 └── prompts/
     ├── system.py         # Shared system prompts
@@ -459,12 +507,25 @@ Generated scripts run in `SubprocessBackend` (or optionally `DockerBackend`) wit
 
 ### Exceptions
 
+Every exception carries an optional `code` attribute (`ErrorCode` enum) for programmatic handling:
+
+```python
+from xlstruct import ErrorCode, StorageError
+
+try:
+    results = extractor.extract_sync("missing.xlsx", schema=MyModel)
+except StorageError as e:
+    if e.code == ErrorCode.STORAGE_NOT_FOUND:
+        print("File not found")
 ```
-XLStructError (base)
-├── StorageError
-├── ReaderError
-├── ExtractionError
-└── CodegenValidationError
+
+```
+XLStructError (base)                    code
+├── StorageError                        STORAGE_NOT_FOUND, STORAGE_PERMISSION_DENIED, STORAGE_READ_FAILED
+├── ReaderError                         READER_UNSUPPORTED_FORMAT, READER_PARSE_FAILED
+├── ExtractionError                     EXTRACTION_LLM_FAILED, EXTRACTION_HEADER_DETECTION_FAILED,
+│                                       EXTRACTION_OUTPUT_PARSE_FAILED
+└── CodegenValidationError              CODEGEN_MAX_RETRIES, CODEGEN_SYNTAX_ERROR, CODEGEN_EXECUTION_FAILED
 ```
 
 ## Development

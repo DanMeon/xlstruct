@@ -1,6 +1,7 @@
 """XLStruct demo — schema-driven Excel extraction with LLM.
 
-Covers: basic extraction, ExtractionConfig, report, provenance, DataFrame export.
+Covers: basic extraction, ExtractionConfig, report, provenance, DataFrame export,
+        progress tracking, error codes.
 
 Usage:
     uv run python examples/demo.py
@@ -21,7 +22,9 @@ from pydantic import BaseModel, Field
 load_dotenv("scripts/.env")
 
 from xlstruct.config import ExtractionConfig, ExtractionMode
+from xlstruct.exceptions import ErrorCode, StorageError
 from xlstruct.extractor import Extractor
+from xlstruct.schemas.progress import ProgressEvent
 
 
 # * Schemas
@@ -179,6 +182,30 @@ async def main():
         )
         r = await extractor.extract(product_path, extraction_config=config)
         print(f"   mode={mode.value:8s} -> resolved={r.report.mode.value}")
+
+    # * 6. Progress tracking (batch extraction)
+    print(f"\n{'=' * 60}")
+    print("6. Batch extraction with progress callback")
+    print("=" * 60)
+    files = [product_path, product_path]  # ^ Same file twice for demo
+
+    def on_progress(event: ProgressEvent):
+        name = PathLibPath(event.source).name
+        print(f"   [{event.completed}/{event.total}] {name}: {event.status}")
+
+    batch = await extractor.extract_batch(files, Product, on_progress=on_progress)
+    print(f"   Result: {batch.succeeded} succeeded, {batch.failed} failed")
+
+    # * 7. Error codes
+    print(f"\n{'=' * 60}")
+    print("7. Error codes")
+    print("=" * 60)
+    try:
+        await extractor.extract("nonexistent_file.xlsx", Product)
+    except StorageError as e:
+        print(f"   Caught: {type(e).__name__}")
+        print(f"   Code:   {e.code}")
+        print(f"   Match:  {e.code == ErrorCode.STORAGE_NOT_FOUND}")
 
 
 if __name__ == "__main__":
