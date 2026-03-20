@@ -16,7 +16,7 @@ import openpyxl
 import python_calamine as pc
 from openpyxl.utils import get_column_letter
 
-from xlstruct.exceptions import ReaderError
+from xlstruct.exceptions import ErrorCode, ReaderError
 from xlstruct.schemas.core import CellData, SheetData, WorkbookData
 
 
@@ -78,12 +78,15 @@ class HybridReader:
             cwb = pc.CalamineWorkbook.from_filelike(buf)
             all_names = cwb.sheet_names
         except Exception as e:
-            raise ReaderError(f"Failed to open workbook: {e}") from e
+            raise ReaderError(
+                f"Failed to open workbook: {e}", code=ErrorCode.READER_PARSE_FAILED
+            ) from e
 
         if sheet_name is not None:
             if sheet_name not in all_names:
                 raise ReaderError(
-                    f"Sheet '{sheet_name}' not found. Available: {all_names}"
+                    f"Sheet '{sheet_name}' not found. Available: {all_names}",
+                    code=ErrorCode.READER_PARSE_FAILED,
                 )
             target_sheets = [sheet_name]
         else:
@@ -101,7 +104,9 @@ class HybridReader:
         except ReaderError:
             raise
         except Exception as e:
-            raise ReaderError(f"Failed to read workbook: {e}") from e
+            raise ReaderError(
+                f"Failed to read workbook: {e}", code=ErrorCode.READER_PARSE_FAILED
+            ) from e
 
         # * Build final WorkbookData
         sheets: list[SheetData] = []
@@ -265,7 +270,8 @@ class HybridReader:
             raise ReaderError(
                 f"Sheet '{sheet.name}': {len(uncached)} formula cell(s) have no cached value. "
                 f"Open the file in Excel and re-save to populate cached values. "
-                f"Cells: {sample}{suffix}"
+                f"Cells: {sample}{suffix}",
+                code=ErrorCode.READER_PARSE_FAILED,
             )
 
     @staticmethod

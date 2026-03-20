@@ -21,7 +21,7 @@ from xlstruct.codegen.validation import ScriptValidator
 from xlstruct.config import SAMPLE_ROWS, ExtractionConfig, ExtractorConfig
 from xlstruct.encoder._formatting import encode_raw_rows
 from xlstruct.encoder.compressed import CompressedEncoder
-from xlstruct.exceptions import CodegenValidationError, ExtractionError
+from xlstruct.exceptions import CodegenValidationError, ErrorCode, ExtractionError
 from xlstruct.prompts.codegen import (
     ANALYZER_SYSTEM_PROMPT,
     CODEGEN_SYSTEM_PROMPT,
@@ -67,7 +67,8 @@ class CodegenOrchestrator:
         if not detection.header_rows:
             raise ExtractionError(
                 "Header detection returned empty result. "
-                "Please provide --header-rows explicitly."
+                "Please provide --header-rows explicitly.",
+                code=ErrorCode.EXTRACTION_HEADER_DETECTION_FAILED,
             )
 
         logger.info(
@@ -149,7 +150,8 @@ class CodegenOrchestrator:
         except SyntaxError as e:
             if self._config.max_codegen_retries <= 0:
                 raise ExtractionError(
-                    f"Generated script has syntax error at line {e.lineno}: {e.msg}"
+                    f"Generated script has syntax error at line {e.lineno}: {e.msg}",
+                    code=ErrorCode.CODEGEN_SYNTAX_ERROR,
                 ) from e
             # ^ Syntax error treated as first failure in correction loop
             result = GeneratedScript(
@@ -181,7 +183,8 @@ class CodegenOrchestrator:
 
         if not validation.success:
             raise ExtractionError(
-                f"Codegen script execution failed: {validation.truncated_traceback}"
+                f"Codegen script execution failed: {validation.truncated_traceback}",
+                code=ErrorCode.CODEGEN_EXECUTION_FAILED,
             )
 
         return self._parse_script_output(validation.stdout, output_schema)
@@ -272,6 +275,7 @@ class CodegenOrchestrator:
             f"Script generation failed after {len(attempts)} attempt(s). "
             f"Last error: {attempts[-1].error}",
             attempts=attempts,
+            code=ErrorCode.CODEGEN_MAX_RETRIES,
         )
 
     async def _request_correction(
@@ -311,11 +315,15 @@ class CodegenOrchestrator:
         try:
             data = json.loads(stdout.strip())
         except json.JSONDecodeError as e:
-            raise ExtractionError(f"Failed to parse script output as JSON: {e}") from e
+            raise ExtractionError(
+                f"Failed to parse script output as JSON: {e}",
+                code=ErrorCode.EXTRACTION_OUTPUT_PARSE_FAILED,
+            ) from e
 
         if not isinstance(data, list):
             raise ExtractionError(
-                f"Expected JSON array from script, got {type(data).__name__}"
+                f"Expected JSON array from script, got {type(data).__name__}",
+                code=ErrorCode.EXTRACTION_OUTPUT_PARSE_FAILED,
             )
 
         results = []

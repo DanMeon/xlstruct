@@ -9,7 +9,7 @@ from typing import Any
 
 import fsspec
 
-from xlstruct.exceptions import StorageError
+from xlstruct.exceptions import ErrorCode, StorageError
 
 
 async def read_file(source: str, **storage_options: Any) -> bytes:
@@ -34,8 +34,14 @@ async def read_file(source: str, **storage_options: Any) -> bytes:
         # ^ fsspec is sync-only for most backends; to_thread is safest async pattern
         return await asyncio.to_thread(_sync_read)
     except FileNotFoundError as e:
-        raise StorageError(f"File not found: {source}") from e
+        raise StorageError(
+            f"File not found: {source}", code=ErrorCode.STORAGE_NOT_FOUND
+        ) from e
     except PermissionError as e:
-        raise StorageError(f"Permission denied: {source}") from e
+        raise StorageError(
+            f"Permission denied: {source}", code=ErrorCode.STORAGE_PERMISSION_DENIED
+        ) from e
     except OSError as e:
-        raise StorageError(f"Failed to read file: {source} — {e}") from e
+        raise StorageError(
+            f"Failed to read file: {source} — {e}", code=ErrorCode.STORAGE_READ_FAILED
+        ) from e

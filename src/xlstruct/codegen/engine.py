@@ -6,7 +6,7 @@ import instructor
 from pydantic import BaseModel
 
 from xlstruct.config import ExtractorConfig, apply_cache_control, build_instructor_client
-from xlstruct.exceptions import ExtractionError
+from xlstruct.exceptions import ErrorCode, ExtractionError
 from xlstruct.prompts.codegen import CODEGEN_SYSTEM_PROMPT
 from xlstruct.schemas.codegen import (
     GeneratedScript,
@@ -87,7 +87,9 @@ class CodegenEngine:
                 self._tracker.record(label, completion)
             return result  # type: ignore[no-any-return]
         except Exception as e:
-            raise ExtractionError(f"{error_msg}: {e}") from e
+            raise ExtractionError(
+                f"{error_msg}: {e}", code=ErrorCode.EXTRACTION_LLM_FAILED
+            ) from e
 
     def _build_messages(
         self, system_prompt: str, user_prompt: str

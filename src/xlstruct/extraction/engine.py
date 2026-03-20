@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, Field, create_model
 
 from xlstruct.config import ExtractorConfig, apply_cache_control, build_instructor_client
-from xlstruct.exceptions import ExtractionError
+from xlstruct.exceptions import ErrorCode, ExtractionError
 from xlstruct.prompts.extraction import build_extraction_prompt
 from xlstruct.prompts.system import SYSTEM_PROMPT
 from xlstruct.schemas.usage import UsageTracker
@@ -89,7 +89,9 @@ class ExtractionEngine:
 
             return items
         except Exception as e:
-            raise ExtractionError(f"LLM extraction failed: {e}") from e
+            raise ExtractionError(
+                f"LLM extraction failed: {e}", code=ErrorCode.EXTRACTION_LLM_FAILED
+            ) from e
 
     @staticmethod
     def _split_provenance(
