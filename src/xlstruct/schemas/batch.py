@@ -46,16 +46,7 @@ class BatchResult(BaseModel, Generic[T]):
         total = TokenUsage()
         for r in self.results:
             if r.usage is not None:
-                total = TokenUsage(
-                    llm_calls=total.llm_calls + r.usage.llm_calls,
-                    input_tokens=total.input_tokens + r.usage.input_tokens,
-                    output_tokens=total.output_tokens + r.usage.output_tokens,
-                    total_tokens=total.total_tokens + r.usage.total_tokens,
-                    cache_creation_tokens=(
-                        total.cache_creation_tokens + r.usage.cache_creation_tokens
-                    ),
-                    cache_read_tokens=total.cache_read_tokens + r.usage.cache_read_tokens,
-                )
+                total = total + r.usage
         return total
 
     @property

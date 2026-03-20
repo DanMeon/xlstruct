@@ -54,6 +54,16 @@ class TokenUsage(BaseModel):
         description="Per-call breakdown: (label, input_tokens, output_tokens)",
     )
 
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        return TokenUsage(
+            llm_calls=self.llm_calls + other.llm_calls,
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+            cache_creation_tokens=self.cache_creation_tokens + other.cache_creation_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+        )
+
 
 class UsageTracker:
     """Accumulates token usage across multiple LLM calls."""

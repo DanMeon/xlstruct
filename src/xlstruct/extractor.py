@@ -25,6 +25,7 @@ from xlstruct.schemas.batch import BatchResult, FileResult
 from xlstruct.schemas.codegen import GeneratedScript
 from xlstruct.schemas.core import SheetData, WorkbookData
 from xlstruct.schemas.usage import TokenUsage, UsageTracker
+from xlstruct.schemas.workbook import SheetResult, WorkbookResult
 from xlstruct.storage import read_file
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,9 @@ class Extractor:
         elif schema is not None:
             workbook = await self._load_workbook(source, sheet_name=sheet, **storage_options)
             target_sheet = workbook.sheets[0]
-            items = await self._run_sheet_extraction(target_sheet, schema, instructions)
+            items = await self._run_sheet_extraction(
+                target_sheet, schema, instructions, engine=self._engine
+            )
         else:
             raise ValueError("Either schema or extraction_config must be provided")
 
@@ -338,6 +341,87 @@ class Extractor:
     ) -> type[BaseModel]:
         """Synchronous wrapper for suggest_schema(). Jupyter-compatible."""
         return _run_sync(self.suggest_schema(source, **kwargs))  # type: ignore[no-any-return]
+
+    # * Multi-sheet extraction
+
+    async def extract_workbook(
+        self,
+        source: str,
+        sheet_schemas: dict[str, type[BaseModel]],
+        *,
+        concurrency: int = 5,
+        instructions: str | None = None,
+        **storage_options: Any,
+    ) -> WorkbookResult:
+        """Extract structured data from multiple sheets in a single workbook.
+
+        Each sheet is mapped to its own Pydantic schema and extracted in parallel.
+        Individual sheet failures do not stop the workbook — partial results are returned.
+
+        Args:
+            source: File path or URL.
+            sheet_schemas: Mapping of sheet name → Pydantic model class.
+            concurrency: Max sheets processed simultaneously (default 5).
+            instructions: Optional natural-language hints for the LLM.
+            **storage_options: Backend-specific storage options.
+
+        Returns:
+            WorkbookResult with per-sheet results keyed by sheet name.
+        """
+        # ^ Load all sheets at once (sheet_name=None)
+        workbook = await self._load_workbook(source, sheet_name=None, **storage_options)
+
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _extract_sheet(
+            sheet_name: str, schema: type[BaseModel]
+        ) -> tuple[str, SheetResult[Any]]:
+            async with semaphore:
+                sheet_data = workbook.get_sheet(sheet_name)
+                if sheet_data is None:
+                    return sheet_name, SheetResult(
+                        sheet_name=sheet_name,
+                        success=False,
+                        error=f"Sheet '{sheet_name}' not found. "
+                        f"Available: {workbook.sheet_names}",
+                    )
+                try:
+                    tracker = UsageTracker()
+                    engine = ExtractionEngine(self._config, tracker=tracker)
+                    items = await self._run_sheet_extraction(
+                        sheet_data, schema, instructions, engine=engine
+                    )
+                    return sheet_name, SheetResult(
+                        sheet_name=sheet_name,
+                        success=True,
+                        records=items,
+                        usage=tracker.snapshot(),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Workbook extraction failed for sheet '%s': %s", sheet_name, e
+                    )
+                    return sheet_name, SheetResult(
+                        sheet_name=sheet_name,
+                        success=False,
+                        error=f"{type(e).__name__}: {e}",
+                    )
+
+        pairs = await asyncio.gather(
+            *[_extract_sheet(name, schema) for name, schema in sheet_schemas.items()]
+        )
+        return WorkbookResult(results=dict(pairs))
+
+    def extract_workbook_sync(
+        self,
+        source: str,
+        sheet_schemas: dict[str, type[BaseModel]],
+        **kwargs: Any,
+    ) -> WorkbookResult:
+        """Synchronous wrapper for extract_workbook(). Jupyter-compatible."""
+        return _run_sync(  # type: ignore[no-any-return]
+            self.extract_workbook(source, sheet_schemas, **kwargs)
+        )
 
     # * Batch extraction
 
@@ -550,8 +634,11 @@ class Extractor:
         sheet: SheetData,
         schema: type[T],
         instructions: str | None = None,
+        *,
+        engine: ExtractionEngine,
     ) -> list[T]:
         """Encoder → (optional Chunking) → ExtractionEngine pipeline."""
+        target_engine = engine
         encoder = CompressedEncoder()
 
         if needs_chunking(sheet, self._config.token_budget):
@@ -560,10 +647,10 @@ class Extractor:
             all_results: list[T] = []
             for chunk in chunks:
                 encoded = encoder.encode(chunk)
-                partial = await self._engine.extract(encoded, schema, instructions)
+                partial = await target_engine.extract(encoded, schema, instructions)
                 all_results.extend(partial)
             return all_results
         else:
             # * Single-pass extraction
             encoded = encoder.encode(sheet)
-            return await self._engine.extract(encoded, schema, instructions)
+            return await target_engine.extract(encoded, schema, instructions)
