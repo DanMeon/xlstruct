@@ -7,8 +7,10 @@ import openpyxl
 import pytest
 from pydantic import BaseModel
 
-from xlstruct.config import ExtractorConfig
-from xlstruct.extractor import Extractor
+from xlstruct.config import ExtractionMode, ExtractorConfig
+from xlstruct.extractor import ExtractionResult, Extractor
+from xlstruct.schemas.report import ExtractionReport
+from xlstruct.schemas.usage import TokenUsage
 
 # * Test schemas
 
@@ -185,6 +187,97 @@ class TestExtractorPipeline:
         # ^ Only one call = no chunking
         mock_extract.assert_called_once()
 
+
+
+class TestExtractionResult:
+    @pytest.fixture
+    def _empty_report(self) -> ExtractionReport:
+        return ExtractionReport(mode=ExtractionMode.DIRECT, usage=TokenUsage())
+
+    def test_report_mode_default(self, _empty_report):
+        """report.mode reflects the extraction mode."""
+        result = ExtractionResult([], report=_empty_report)
+        assert result.report.mode == ExtractionMode.DIRECT
+
+    def test_report_mode_codegen(self):
+        """report.mode can be set to CODEGEN."""
+        report = ExtractionReport(mode=ExtractionMode.CODEGEN, usage=TokenUsage())
+        result = ExtractionResult([], report=report)
+        assert result.report.mode == ExtractionMode.CODEGEN
+
+    def test_report_source_rows_default_empty(self, _empty_report):
+        """report.source_rows defaults to empty list."""
+        result = ExtractionResult([], report=_empty_report)
+        assert result.report.source_rows == []
+
+    def test_report_source_rows_set(self):
+        """report.source_rows can be set explicitly."""
+        rows = [[2], [3], [4, 5]]
+        report = ExtractionReport(
+            mode=ExtractionMode.DIRECT, usage=TokenUsage(), source_rows=rows
+        )
+        result = ExtractionResult([], report=report)
+        assert result.report.source_rows == [[2], [3], [4, 5]]
+
+    def test_report_summary(self):
+        """report.summary() returns a human-readable string."""
+        report = ExtractionReport(
+            mode=ExtractionMode.DIRECT,
+            usage=TokenUsage(input_tokens=100, output_tokens=50, total_tokens=150),
+            source_rows=[[2], [3]],
+        )
+        text = report.summary()
+        assert "direct" in text
+        assert "150" in text
+        assert "2 records mapped" in text
+
+    def test_to_dataframe(self, _empty_report):
+        """to_dataframe() converts records to a pandas DataFrame."""
+        pd = pytest.importorskip("pandas")
+        items = [
+            Product(name="Apple", price=1.5, stock=100),
+            Product(name="Banana", price=0.75, stock=200),
+        ]
+        result = ExtractionResult(items, report=_empty_report)
+        df = result.to_dataframe()
+
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 2
+        assert list(df.columns) == ["name", "price", "stock"]
+        assert df.iloc[0]["name"] == "Apple"
+        assert df.iloc[1]["price"] == 0.75
+
+    def test_to_dataframe_empty(self, _empty_report):
+        """to_dataframe() returns empty DataFrame for empty results."""
+        pd = pytest.importorskip("pandas")
+        result: ExtractionResult[Product] = ExtractionResult([], report=_empty_report)
+        df = result.to_dataframe()
+
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 0
+
+    def test_to_dataframe_import_error(self, _empty_report):
+        """to_dataframe() raises ImportError when pandas is missing."""
+        result = ExtractionResult(
+            [Product(name="A", price=1.0, stock=1)], report=_empty_report
+        )
+        with patch.dict("sys.modules", {"pandas": None}):
+            with pytest.raises(ImportError, match="pandas is required"):
+                result.to_dataframe()
+
+
+class TestExtractionResultFromExtractor:
+    @pytest.mark.asyncio
+    async def test_legacy_extract_report(self, product_xlsx_file):
+        """Legacy schema-based extraction should produce report with mode=DIRECT."""
+        extractor = Extractor()
+        with patch.object(extractor._engine, "extract", new_callable=AsyncMock) as mock_extract:
+            mock_extract.return_value = [Product(name="Apple", price=1.5, stock=100)]
+            result = await extractor.extract(product_xlsx_file, Product)
+
+        assert result.report.mode == ExtractionMode.DIRECT
+        assert result.report.usage.llm_calls == 0  # ^ mocked, no real calls
+        assert result.report.source_rows == []
 
 
 class TestExtractorLoadWorkbook:

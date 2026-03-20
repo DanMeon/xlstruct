@@ -15,6 +15,13 @@ _TASK_SECTION = (
     "into the requested schema. Return the complete list."
 )
 
+_PROVENANCE_SECTION = (
+    "\n## Row Provenance\n"
+    "For each extracted record, include a `source_rows` field containing "
+    "the 1-indexed Excel row number(s) that the record was extracted from. "
+    "Use the Row column in the data table above to determine the row numbers.\n"
+)
+
 
 def build_extraction_prompt(
     encoded_sheet: str,
@@ -22,6 +29,7 @@ def build_extraction_prompt(
     *,
     is_sampled: bool = False,
     total_rows: int | None = None,
+    track_provenance: bool = False,
 ) -> str:
     """Build the user prompt for extraction.
 
@@ -30,6 +38,7 @@ def build_extraction_prompt(
         instructions: Optional natural-language hints from the user.
         is_sampled: Whether the data is a sample from a larger sheet.
         total_rows: Total row count of the original sheet (shown when sampled).
+        track_provenance: Whether to instruct the LLM to include source row numbers.
     """
     parts: list[str] = []
 
@@ -41,5 +50,8 @@ def build_extraction_prompt(
 
     parts.append(f"## Spreadsheet Data\n\n{encoded_sheet}")
     parts.append(_TASK_SECTION)
+
+    if track_provenance:
+        parts.append(_PROVENANCE_SECTION)
 
     return "\n".join(parts)

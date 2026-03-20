@@ -44,9 +44,10 @@ gcs = ["gcsfs"]
 openai = ["openai"]
 anthropic = ["anthropic"]
 gemini = ["google-genai"]
+pandas = ["pandas>=2.0"]
 all-storage = ["s3fs", "adlfs", "gcsfs"]
 all-llm = ["openai", "anthropic", "google-genai"]
-all = ["s3fs", "adlfs", "gcsfs", "openai", "anthropic", "google-genai"]
+all = ["s3fs", "adlfs", "gcsfs", "openai", "anthropic", "google-genai", "pandas>=2.0"]
 docker = [
     "aiodocker>=0.26.0",
 ]
@@ -92,6 +93,7 @@ dev = [
     "azure-storage-blob>=12.28.0",
     "gcsfs>=2026.2.0",
     "mypy>=1.19.1",
+    "pandas>=3.0.1",
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23.0",

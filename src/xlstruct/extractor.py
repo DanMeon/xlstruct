@@ -8,7 +8,10 @@ import asyncio
 import logging
 import re
 from pathlib import Path as PathLibPath
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from pandas import DataFrame  # type: ignore[import-untyped]
 
 from pydantic import BaseModel, SecretStr
 
@@ -31,7 +34,8 @@ from xlstruct.reader.hybrid_reader import HybridReader
 from xlstruct.schemas.batch import BatchResult, FileResult
 from xlstruct.schemas.codegen import GeneratedScript
 from xlstruct.schemas.core import SheetData, WorkbookData
-from xlstruct.schemas.usage import TokenUsage, UsageTracker
+from xlstruct.schemas.report import ExtractionReport
+from xlstruct.schemas.usage import UsageTracker
 from xlstruct.schemas.workbook import SheetResult, WorkbookResult
 from xlstruct.storage import read_file
 
@@ -41,17 +45,36 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class ExtractionResult(list[T]):  # type: ignore[type-var,unused-ignore]
-    """List of extracted records with attached token usage info.
+    """List of extracted records with an attached extraction report.
 
     Behaves exactly like list[T] (iteration, indexing, len, etc.)
-    but also exposes a `.usage` attribute with token consumption details.
+    but also exposes a ``.report`` attribute containing extraction metadata
+    (mode used, token usage, provenance, etc.).
     """
 
-    usage: TokenUsage
+    report: ExtractionReport
 
-    def __init__(self, items: list[T], usage: TokenUsage) -> None:
+    def __init__(self, items: list[T], report: ExtractionReport) -> None:
         super().__init__(items)
-        self.usage = usage
+        self.report = report
+
+    def to_dataframe(self) -> "DataFrame":
+        """Convert extracted records to a pandas DataFrame.
+
+        Requires pandas to be installed: ``pip install xlstruct[pandas]``
+
+        Returns:
+            pandas DataFrame with one row per extracted record.
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError(
+                "pandas is required for to_dataframe(). "
+                "Install it with: pip install xlstruct[pandas]"
+            ) from None
+
+        return pd.DataFrame([item.model_dump() for item in self])
 
 
 def _run_sync(coro: Any) -> Any:
@@ -168,12 +191,12 @@ class Extractor:
             **storage_options: Backend-specific storage options.
 
         Returns:
-            ExtractionResult — list[T] with `.usage` attribute for token consumption.
+            ExtractionResult — list[T] with ``.report`` for extraction metadata.
         """
         self._tracker.reset()
 
         if extraction_config is not None:
-            items = await self._run_configured_extraction(
+            items, resolved_mode = await self._run_configured_extraction(
                 source, extraction_config, **storage_options
             )
         elif schema is not None:
@@ -182,12 +205,27 @@ class Extractor:
             items = await self._run_sheet_extraction(
                 target_sheet, schema, instructions, engine=self._engine
             )
+            resolved_mode = ExtractionMode.DIRECT
         else:
             raise ValueError("Either schema or extraction_config must be provided")
 
+        # * Collect provenance from records (set by ExtractionEngine._split_provenance)
+        source_rows: list[list[int]] = [
+            getattr(item, "_source_rows", []) for item in items
+        ]
+        # ^ Only include if any provenance was actually tracked
+        if not any(source_rows):
+            source_rows = []
+
         usage = self._tracker.snapshot()
         logger.info(usage)
-        return ExtractionResult(items, usage=usage)
+
+        report = ExtractionReport(
+            mode=resolved_mode,
+            usage=usage,
+            source_rows=source_rows,
+        )
+        return ExtractionResult(items, report=report)
 
     async def generate_script(
         self,
@@ -466,7 +504,7 @@ class Extractor:
                         source=source,
                         success=True,
                         records=list(result),
-                        usage=result.usage,
+                        usage=result.report.usage,
                     )
                 except Exception as e:
                     logger.warning("Batch extraction failed for %s: %s", source, e)
@@ -535,12 +573,15 @@ class Extractor:
         source: str,
         config: ExtractionConfig,
         **storage_options: Any,
-    ) -> list[Any]:
+    ) -> tuple[list[Any], ExtractionMode]:
         """Config-based extraction with mode selection.
 
         - mode=auto: heuristic routing (≤ SAMPLE_ROWS → direct, > SAMPLE_ROWS → codegen).
         - mode=direct: always use LLM direct extraction.
         - mode=codegen: always use code generation pipeline.
+
+        Returns:
+            Tuple of (extracted items, resolved extraction mode).
         """
         workbook = await self._load_workbook(
             source, sheet_name=config.sheet, **storage_options
@@ -568,9 +609,11 @@ class Extractor:
             )
 
         if mode == ExtractionMode.CODEGEN:
-            return await self._run_codegen(source, full_sheet, header_rows, config, codegen)
+            items = await self._run_codegen(source, full_sheet, header_rows, config, codegen)
+            return items, ExtractionMode.CODEGEN
 
-        return await self._run_direct(full_sheet, header_rows, config)
+        items = await self._run_direct(full_sheet, header_rows, config)
+        return items, ExtractionMode.DIRECT
 
     async def _run_codegen(
         self,
@@ -623,6 +666,7 @@ class Extractor:
             config.instructions,
             is_sampled=True,
             total_rows=full_sheet.row_count,
+            track_provenance=config.track_provenance,
         )
 
     async def _run_sheet_extraction(

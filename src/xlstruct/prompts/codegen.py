@@ -346,6 +346,15 @@ _TASK_SECTION = (
     "Return the complete Python script as a single code block."
 )
 
+_PROVENANCE_SECTION = (
+    "\n## Row Provenance\n"
+    "For each output record, include a `_source_row` key in the JSON dict "
+    "containing the 1-indexed Excel row number that the record was extracted from. "
+    "This field is NOT part of the Pydantic schema — add it to the dict AFTER "
+    "`model_dump()` and BEFORE appending to the results list.\n"
+    "Example: `record_dict = item.model_dump(); record_dict['_source_row'] = row_num`\n"
+)
+
 # * Conditional pattern guides (injected into user prompt based on MappingPlan)
 
 _PIVOT_GUIDE = """\
@@ -450,6 +459,7 @@ def build_codegen_prompt(
     file_name: str = "",
     header_rows: list[int] | None = None,
     mapping_plan: "MappingPlan | None" = None,
+    track_provenance: bool = False,
 ) -> str:
     """Build the user prompt for Phase 1 (Parser Agent).
 
@@ -462,6 +472,7 @@ def build_codegen_prompt(
         file_name: Original file name (used to detect format).
         header_rows: 1-indexed header row numbers (e.g. [1, 2]).
         mapping_plan: Optional MappingPlan from Phase 0 to guide code generation.
+        track_provenance: Whether to instruct the script to include source row numbers.
     """
     parts: list[str] = []
 
@@ -497,6 +508,9 @@ def build_codegen_prompt(
     parts.append(f"## Sample Spreadsheet Data\n\n{encoded_sheet}")
 
     parts.append(_TASK_SECTION)
+
+    if track_provenance:
+        parts.append(_PROVENANCE_SECTION)
 
     return "\n".join(parts)
 

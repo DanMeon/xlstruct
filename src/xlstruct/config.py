@@ -95,6 +95,11 @@ class ExtractionConfig(BaseModel):
         "Include data transformation rules here if needed "
         "(e.g. 'Parse dates as YYYY-MM-DD', 'region_code: N → North').",
     )
+    track_provenance: bool = Field(
+        default=False,
+        description="When True, each extracted record includes source row number(s) "
+        "from the original Excel file. Stored in ExtractionResult.source_rows.",
+    )
 
     @field_validator("header_rows")
     @classmethod

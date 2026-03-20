@@ -134,6 +134,7 @@ class CodegenOrchestrator:
             file_name=file_name,
             header_rows=header_rows,
             mapping_plan=mapping_plan,
+            track_provenance=extraction_config.track_provenance,
         )
 
         # * Phase 1: Parser Agent — generate parsing script
@@ -302,7 +303,11 @@ class CodegenOrchestrator:
 
     @staticmethod
     def _parse_script_output(stdout: str, schema: type[BaseModel]) -> list[Any]:
-        """Parse JSON stdout from a codegen script into validated Pydantic models."""
+        """Parse JSON stdout from a codegen script into validated Pydantic models.
+
+        Strips _source_row from records (if present) and stores it as an attribute
+        on each validated model instance for provenance tracking.
+        """
         try:
             data = json.loads(stdout.strip())
         except json.JSONDecodeError as e:
@@ -315,8 +320,13 @@ class CodegenOrchestrator:
 
         results = []
         for i, item in enumerate(data):
+            # ^ Extract provenance before validation (not part of schema)
+            source_row = item.pop("_source_row", None) if isinstance(item, dict) else None
             try:
-                results.append(schema.model_validate(item))
+                record = schema.model_validate(item)
+                if source_row is not None:
+                    record._source_rows = [source_row]  # type: ignore[attr-defined]
+                results.append(record)
             except ValidationError as e:
                 logger.warning("Record %d failed validation, skipping: %s", i, e)
         return results
