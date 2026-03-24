@@ -10,16 +10,22 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "DanMeon" }]
-keywords = ["excel", "llm", "pydantic", "structured-data", "extraction", "spreadsheet"]
+keywords = ["excel", "llm", "pydantic", "structured-data", "extraction", "spreadsheet", "parser", "csv", "schema"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Framework :: Pydantic",
+    "Framework :: Pydantic :: 2",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Spreadsheet",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
 dependencies = [
