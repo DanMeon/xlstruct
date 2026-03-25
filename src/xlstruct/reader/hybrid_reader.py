@@ -68,6 +68,7 @@ class HybridReader:
         *,
         source_ext: str = ".xlsx",
         strict_formulas: bool = True,
+        evaluate_formulas: bool = False,
     ) -> WorkbookData:
         """Read an Excel file from bytes into WorkbookData.
 
@@ -79,6 +80,8 @@ class HybridReader:
             strict_formulas: When True, raise ReaderError if formula cells
                 have no cached value. When False, log a warning and continue
                 (the LLM will see the formula string instead of the computed value).
+            evaluate_formulas: If True, evaluate formula cells using the
+                formulas library before checking for uncached formulas.
         """
         buf = io.BytesIO(file_bytes)
 
@@ -120,6 +123,11 @@ class HybridReader:
         sheets: list[SheetData] = []
         for sn in target_sheets:
             sheet = self._build_sheet_data(calamine_data[sn])
+            # * Optional formula evaluation before uncached-formula check
+            if evaluate_formulas:
+                from xlstruct.reader.formula_eval import evaluate_sheet_formulas
+
+                sheet = evaluate_sheet_formulas(sheet)
             # * Check formula cells without cached values
             self._check_uncached_formulas(sheet, strict=strict_formulas)
             sheets.append(sheet)

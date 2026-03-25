@@ -65,6 +65,11 @@ class ExtractorConfig(BaseModel):
         "(common with Google Sheets exports). When False, log a warning and fall back "
         "to showing the formula string instead of the computed value.",
     )
+    evaluate_formulas: bool = Field(
+        default=False,
+        description="Evaluate formula cells using the formulas library. "
+        "Requires: pip install xlstruct[formulas]",
+    )
     provider_options: dict[str, Any] = Field(default_factory=dict)
     storage_options: dict[str, Any] = Field(default_factory=dict)
 

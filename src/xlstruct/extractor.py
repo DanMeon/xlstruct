@@ -652,6 +652,7 @@ class Extractor:
                 sheet_name,
                 source_ext=ext,
                 strict_formulas=self._config.strict_formulas,
+                evaluate_formulas=self._config.evaluate_formulas,
             )
 
         workbook.file_name = source.rsplit("/", 1)[-1]

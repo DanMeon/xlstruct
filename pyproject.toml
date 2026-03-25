@@ -58,6 +58,7 @@ all = ["s3fs", "adlfs", "gcsfs", "openai", "anthropic", "google-genai", "pandas>
 docker = [
     "aiodocker>=0.26.0",
 ]
+formulas = ["formulas>=1.2"]
 
 [project.scripts]
 xlstruct = "xlstruct.cli:app"
@@ -79,7 +80,7 @@ strict = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["openpyxl.*", "fsspec.*", "calamine.*", "anthropic.*", "instructor.*", "tiktoken.*", "aiodocker.*"]
+module = ["openpyxl.*", "fsspec.*", "calamine.*", "anthropic.*", "instructor.*", "tiktoken.*", "aiodocker.*", "formulas.*", "numpy.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
