@@ -222,9 +222,12 @@ class Extractor:
 
         # * Collect provenance from records (set by ExtractionEngine._split_provenance)
         source_rows: list[list[int]] = [getattr(item, "_source_rows", []) for item in items]
+        source_cells: list[dict[str, str]] = [getattr(item, "_source_cells", {}) for item in items]
         # ^ Only include if any provenance was actually tracked
         if not any(source_rows):
             source_rows = []
+        if not any(source_cells):
+            source_cells = []
 
         usage = self._tracker.snapshot()
         logger.info(usage)
@@ -233,6 +236,7 @@ class Extractor:
             mode=resolved_mode,
             usage=usage,
             source_rows=source_rows,
+            source_cells=source_cells,
         )
         return ExtractionResult(items, report=report)
 

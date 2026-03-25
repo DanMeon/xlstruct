@@ -14,7 +14,7 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def _build_provenance_schema(schema: type[T]) -> type[BaseModel]:
-    """Dynamically create a wrapper schema that includes source_rows."""
+    """Dynamically create a wrapper schema that includes source_rows and source_cells."""
     field_definitions: dict[str, Any] = {}
     for name, info in schema.model_fields.items():
         field_definitions[name] = (info.annotation, info)
@@ -23,6 +23,13 @@ def _build_provenance_schema(schema: type[T]) -> type[BaseModel]:
         Field(
             description="1-indexed Excel row number(s) this record was extracted from. "
             "Use the Row column in the spreadsheet data.",
+        ),
+    )
+    field_definitions["source_cells"] = (
+        dict[str, str],
+        Field(
+            description='Mapping of output field name to cell address (e.g. "A5", "C14"). '
+            "Use column letters from the table header and row numbers from the Row column.",
         ),
     )
     return create_model(f"{schema.__name__}WithProvenance", **field_definitions)
@@ -95,16 +102,18 @@ class ExtractionEngine:
 
     @staticmethod
     def _split_provenance(items: list[BaseModel], original_schema: type[T]) -> list[T]:
-        """Strip source_rows from wrapper records, rebuild as original schema.
+        """Strip provenance fields from wrapper records, rebuild as original schema.
 
-        Stores source_rows on each record as _source_rows attribute for
-        later collection by the Extractor.
+        Stores source_rows and source_cells on each record as private attributes
+        for later collection by the Extractor.
         """
         cleaned: list[T] = []
         for item in items:
             data = item.model_dump()
             source_rows = data.pop("source_rows", [])
+            source_cells = data.pop("source_cells", {})
             record = original_schema.model_validate(data)
             record._source_rows = source_rows  # type: ignore[attr-defined]
+            record._source_cells = source_cells  # type: ignore[attr-defined]
             cleaned.append(record)
         return cleaned

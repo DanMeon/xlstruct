@@ -24,6 +24,11 @@ class ExtractionReport(BaseModel):
         description="Per-record source row numbers from the original Excel file. "
         "Populated when track_provenance=True. Parallel to the result items list.",
     )
+    source_cells: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Per-record cell address mapping (field_name -> cell address like 'A5'). "
+        "Populated when track_provenance=True. Parallel to the result items list.",
+    )
 
     def summary(self) -> str:
         """Human-readable summary of the extraction."""
@@ -45,6 +50,8 @@ class ExtractionReport(BaseModel):
 
         if self.source_rows:
             lines.append(f"Provenance: {len(self.source_rows)} records mapped")
+        if self.source_cells:
+            lines.append(f"Cell provenance: {len(self.source_cells)} records mapped")
 
         return "\n".join(lines)
 

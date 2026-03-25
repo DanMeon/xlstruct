@@ -22,6 +22,16 @@ _PROVENANCE_SECTION = (
     "Use the Row column in the data table above to determine the row numbers.\n"
 )
 
+_CELL_PROVENANCE_SECTION = (
+    "\n## Cell Provenance\n"
+    "For each extracted record, include a `source_cells` field: a JSON object mapping "
+    'each output field name to the cell address (e.g. "A5", "C14") it was extracted from. '
+    "Use the column letters from the table header and the Row column for row numbers. "
+    'Example: {"name": "A5", "amount": "C5", "date": "D5"}. '
+    "If a field is derived from multiple cells or not directly from a single cell, "
+    "use the most relevant cell address.\n"
+)
+
 
 def build_extraction_prompt(
     encoded_sheet: str,
@@ -53,5 +63,6 @@ def build_extraction_prompt(
 
     if track_provenance:
         parts.append(_PROVENANCE_SECTION)
+        parts.append(_CELL_PROVENANCE_SECTION)
 
     return "\n".join(parts)
