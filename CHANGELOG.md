@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-25
+
+### Added
+
+- **CSV dialect auto-detection** — semicolon, tab, and pipe delimiters
+- **Cell number format** — `CellData.number_format` field stores Excel Number Format String from openpyxl
+- **Strict formulas toggle** — `strict_formulas` config for graceful handling of uncached formula cells
+- **Formula evaluation** — optional evaluation via `formulas` library (`evaluate_formulas` config); `xlstruct[formulas]` extra
+- **Cell-address provenance** — `source_cells` in `ExtractionReport` for cell-address level tracking
+- **Per-field confidence scores** — LLM self-assessment via `include_confidence` config
+- **Schema suggestion Python API** — `suggest_schema_source()` / `suggest_schema_source_sync()` public functions
+- **`render_schema_source()` utility** in `xlstruct.suggest` module
+- **Streaming extraction** — `Extractor.stream()` / `stream_sync()` AsyncGenerator-based streaming
+- **Cross-sheet extraction** — `Extractor.extract_cross_sheet()` extracts from multiple sheets into a unified Pydantic model
+- **CLI `extract` command** with `--schema`, `--mode`, `--format` options
+- **CLI `batch` command** for multi-file extraction
+- **CLI `cache` subcommands** — `cache list`, `cache clear`, `cache remove`
+- **MCP server** (`xlstruct-mcp`) with 7 tools for AI agent integration; `xlstruct[mcp]` extra
+
+### Changed
+
+- `summarize_column_types()` now uses `number_format` for more accurate currency/percentage/date detection
+- CLI entry point changed to `_cli_entry` (adds cwd to `sys.path` for local schema imports)
+- `CompressedEncoder` instantiation now uses `create_encoder()` factory
+
+### Fixed
+
+- Confidence schema wrapping now correctly excludes provenance fields (`source_rows`, `source_cells`)
+
 ## [0.4.1] - 2026-03-20
 
 ### Added
