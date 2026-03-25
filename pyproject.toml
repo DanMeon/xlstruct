@@ -59,9 +59,11 @@ docker = [
     "aiodocker>=0.26.0",
 ]
 formulas = ["formulas>=1.2"]
+mcp = ["mcp>=1.0"]
 
 [project.scripts]
 xlstruct = "xlstruct.cli:_cli_entry"
+xlstruct-mcp = "xlstruct.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xlstruct"]
@@ -80,7 +82,7 @@ strict = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["openpyxl.*", "fsspec.*", "calamine.*", "anthropic.*", "instructor.*", "tiktoken.*", "aiodocker.*", "formulas.*", "numpy.*"]
+module = ["openpyxl.*", "fsspec.*", "calamine.*", "anthropic.*", "instructor.*", "tiktoken.*", "aiodocker.*", "formulas.*", "numpy.*", "mcp.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

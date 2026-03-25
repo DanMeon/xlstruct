@@ -47,12 +47,12 @@ def evaluate_sheet_formulas(sheet: SheetData) -> SheetData:
     Returns:
         A new SheetData with updated cached_value on formula cells.
     """
-    formulas_lib = _import_formulas()
-
     # * Collect formula cells
     formula_cells = [c for c in sheet.cells if c.formula]
     if not formula_cells:
         return sheet
+
+    formulas_lib = _import_formulas()
 
     # * Build temporary .xlsx with all cell data
     import openpyxl

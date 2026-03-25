@@ -11,6 +11,14 @@ import pytest
 from xlstruct.reader.hybrid_reader import HybridReader
 from xlstruct.schemas.core import CellData, SheetData
 
+_has_formulas = True
+try:
+    import formulas  # noqa: F401
+except ImportError:
+    _has_formulas = False
+
+requires_formulas = pytest.mark.skipif(not _has_formulas, reason="formulas package not installed")
+
 # * Fixtures
 
 
@@ -93,6 +101,7 @@ def test_no_formulas_returns_unchanged(sheet_no_formulas):
 # * Basic SUM evaluation
 
 
+@requires_formulas
 def test_evaluate_sum_formula(sheet_with_sum):
     """SUM(A1:A2) with values 10 and 20 should evaluate to 30."""
     from xlstruct.reader.formula_eval import evaluate_sheet_formulas
@@ -108,6 +117,7 @@ def test_evaluate_sum_formula(sheet_with_sum):
 # * Failed evaluation warning
 
 
+@requires_formulas
 def test_failed_eval_logs_warning(sheet_with_sum, caplog):
     """A cell with an unparseable formula result key should log a warning."""
     from xlstruct.reader.formula_eval import evaluate_sheet_formulas
@@ -141,6 +151,7 @@ def test_failed_eval_logs_warning(sheet_with_sum, caplog):
 # * Integration: HybridReader with evaluate_formulas=True
 
 
+@requires_formulas
 def test_hybrid_reader_evaluate_formulas_integration(xlsx_with_formula):
     """HybridReader.read() with evaluate_formulas=True should compute formula values."""
     reader = HybridReader()
