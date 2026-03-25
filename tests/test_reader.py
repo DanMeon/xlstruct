@@ -258,6 +258,88 @@ class TestHybridReaderXls:
             reader.read(b"not a valid xls file", source_ext=".xls")
 
 
+# * Number format tests
+
+
+class TestNumberFormat:
+    """HybridReader must store cell number_format from openpyxl Pass 2."""
+
+    def test_currency_format(self):
+        """Currency number format ($#,##0.00) is stored on CellData."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Money"
+        ws["A1"] = "Amount"
+        ws["A2"] = 1234.56
+        ws["A2"].number_format = "$#,##0.00"
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        reader = HybridReader()
+        result = reader.read(buf.getvalue())
+        cell = result.sheets[0].get_cell(2, 1)
+        assert cell is not None
+        assert cell.number_format == "$#,##0.00"
+
+    def test_percentage_format(self):
+        """Percentage number format (0.00%) is stored on CellData."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Pct"
+        ws["A1"] = "Rate"
+        ws["A2"] = 0.15
+        ws["A2"].number_format = "0.00%"
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        reader = HybridReader()
+        result = reader.read(buf.getvalue())
+        cell = result.sheets[0].get_cell(2, 1)
+        assert cell is not None
+        assert cell.number_format == "0.00%"
+
+    def test_date_format(self):
+        """Date number format (yyyy-mm-dd) is stored on CellData."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Dates"
+        ws["A1"] = "Date"
+        ws["A2"] = "2024-01-15"
+        ws["A2"].number_format = "yyyy-mm-dd"
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        reader = HybridReader()
+        result = reader.read(buf.getvalue())
+        cell = result.sheets[0].get_cell(2, 1)
+        assert cell is not None
+        assert cell.number_format == "yyyy-mm-dd"
+
+    def test_general_format_stays_none(self):
+        """Cells with 'General' format should have number_format=None."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Plain"
+        ws["A1"] = "Value"
+        ws["A2"] = 42
+        # ^ Default format is "General" — should not be stored
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        reader = HybridReader()
+        result = reader.read(buf.getvalue())
+        cell = result.sheets[0].get_cell(2, 1)
+        assert cell is not None
+        assert cell.number_format is None
+
+    def test_xls_number_format_is_none(self, simple_xls_bytes: bytes):
+        """.xls files skip Pass 2, so number_format is always None."""
+        reader = HybridReader()
+        result = reader.read(simple_xls_bytes, source_ext=".xls")
+        for cell in result.sheets[0].cells:
+            assert cell.number_format is None
+
+
 # * Extractor._get_source_ext() tests
 
 

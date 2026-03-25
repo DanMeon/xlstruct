@@ -39,6 +39,8 @@ class _CalamineSheetData:
     data_types: dict[tuple[int, int], str] = field(default_factory=dict)
     # ^ {(1-indexed row, col): formula_string} — populated by openpyxl pass
     formulas: dict[tuple[int, int], str] = field(default_factory=dict)
+    # ^ {(1-indexed row, col): number_format_string} — populated by openpyxl pass
+    number_formats: dict[tuple[int, int], str] = field(default_factory=dict)
 
     # ^ Formats where openpyxl can extract formula strings (Pass 2)
 
@@ -182,7 +184,7 @@ class HybridReader:
         target_sheets: list[str],
         calamine_data: dict[str, _CalamineSheetData],
     ) -> None:
-        """Pass 2: Extract formula strings from openpyxl (read_only mode)."""
+        """Pass 2: Extract formula strings and number formats from openpyxl (read_only mode)."""
         wb = openpyxl.load_workbook(buf, read_only=True, data_only=False)
         try:
             for sn in target_sheets:
@@ -196,6 +198,10 @@ class HybridReader:
                         val = cell.value
                         if isinstance(val, str) and val.startswith("="):
                             cal.formulas[(cell.row, cell.column)] = val
+                        # ^ Store number format if it's not the uninformative default
+                        nf = cell.number_format
+                        if nf and nf != "General":
+                            cal.number_formats[(cell.row, cell.column)] = nf
         finally:
             wb.close()
 
@@ -209,6 +215,7 @@ class HybridReader:
             value = cal.values.get((row, col))
             data_type = cal.data_types.get((row, col), "n")
             formula = cal.formulas.get((row, col))
+            number_format = cal.number_formats.get((row, col))
             is_merged = (row, col) in cal.merged_cell_map
             merge_range = cal.merged_cell_map.get((row, col))
             merge_origin = cal.merge_origins.get((row, col))
@@ -223,6 +230,7 @@ class HybridReader:
                         formula=formula,
                         cached_value=value,
                         data_type="f",
+                        number_format=number_format,
                         is_merged=is_merged,
                         merge_range=merge_range,
                         merge_origin=merge_origin,
@@ -238,6 +246,7 @@ class HybridReader:
                         formula=None,
                         cached_value=value,
                         data_type=data_type,
+                        number_format=number_format,
                         is_merged=is_merged,
                         merge_range=merge_range,
                         merge_origin=merge_origin,

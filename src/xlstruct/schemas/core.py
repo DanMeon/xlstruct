@@ -14,6 +14,7 @@ class CellData(BaseModel):
     formula: str | None = None
     cached_value: str | int | float | bool | None = None
     data_type: str = "n"
+    number_format: str | None = None
     is_merged: bool = False
     merge_range: str | None = None
     merge_origin: tuple[int, int] | None = None

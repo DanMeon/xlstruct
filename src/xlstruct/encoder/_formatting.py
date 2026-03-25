@@ -353,13 +353,35 @@ def find_empty_rows(sheet: SheetData) -> set[int]:
 # * Column type summary
 
 
+def _classify_number_format(nf: str) -> str | None:
+    """Infer a semantic type from an Excel number format string.
+
+    Returns "currency", "percentage", or "date" if the format matches
+    well-known patterns; None otherwise.
+    """
+    # ^ Currency: contains $, EUR, GBP, JPY, or other currency symbols
+    if re.search(r"[$€£¥₩]", nf) or re.search(r'"\$"', nf):
+        return "currency"
+    # ^ Percentage: contains literal %
+    if "%" in nf:
+        return "percentage"
+    # ^ Date/time: contains y/m/d or h/m/s patterns (case-insensitive)
+    if re.search(r"[yYmMdDhHsS]", nf) and re.search(r"[yYdDhHsS]", nf):
+        return "date"
+    return None
+
+
 def summarize_column_types(
     sheet: SheetData,
     header_row: int | None = None,
 ) -> dict[int, str]:
     """Summarize the dominant data type per column.
 
-    Returns {col: "int"/"float"/"str"/"date"/"bool"/"mixed"}.
+    Returns {col: "int"/"float"/"str"/"date"/"bool"/"currency"/"percentage"/"mixed"}.
+
+    When ``number_format`` is available on cells, it is used to refine
+    numeric types into more specific semantic types such as "currency",
+    "percentage", or "date".
     """
     col_types: dict[int, list[str]] = {}
 
@@ -371,8 +393,15 @@ def summarize_column_types(
         if cell.merge_origin is not None:
             continue
 
+        # ^ Try number_format-based classification first
+        nf_type: str | None = None
+        if cell.number_format:
+            nf_type = _classify_number_format(cell.number_format)
+
         val = cell.display_value
-        if isinstance(val, bool):
+        if nf_type:
+            t = nf_type
+        elif isinstance(val, bool):
             t = "bool"
         elif isinstance(val, int):
             t = "int"
