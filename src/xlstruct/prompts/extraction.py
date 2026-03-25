@@ -32,6 +32,17 @@ _CELL_PROVENANCE_SECTION = (
     "use the most relevant cell address.\n"
 )
 
+_CONFIDENCE_SECTION = (
+    "\n## Field Confidence\n"
+    "For each field in every extracted record, assess your confidence level "
+    "and populate the corresponding `<field>_confidence` field:\n"
+    "- **very_high**: Certain — value is clearly and unambiguously present in the cell data.\n"
+    "- **high**: Strong inference — value is very likely correct based on context.\n"
+    "- **moderate**: Reasonable guess — value requires some interpretation or assumption.\n"
+    "- **low**: Uncertain — limited evidence, value could be wrong.\n"
+    "- **very_low**: Mostly guessing — very little supporting data.\n"
+)
+
 
 def build_extraction_prompt(
     encoded_sheet: str,
@@ -40,6 +51,7 @@ def build_extraction_prompt(
     is_sampled: bool = False,
     total_rows: int | None = None,
     track_provenance: bool = False,
+    include_confidence: bool = False,
 ) -> str:
     """Build the user prompt for extraction.
 
@@ -49,6 +61,7 @@ def build_extraction_prompt(
         is_sampled: Whether the data is a sample from a larger sheet.
         total_rows: Total row count of the original sheet (shown when sampled).
         track_provenance: Whether to instruct the LLM to include source row numbers.
+        include_confidence: Whether to instruct the LLM to include per-field confidence.
     """
     parts: list[str] = []
 
@@ -64,5 +77,8 @@ def build_extraction_prompt(
     if track_provenance:
         parts.append(_PROVENANCE_SECTION)
         parts.append(_CELL_PROVENANCE_SECTION)
+
+    if include_confidence:
+        parts.append(_CONFIDENCE_SECTION)
 
     return "\n".join(parts)

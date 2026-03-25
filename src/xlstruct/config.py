@@ -112,6 +112,12 @@ class ExtractionConfig(BaseModel):
         description="When True, each extracted record includes source row number(s) "
         "from the original Excel file. Stored in ExtractionResult.source_rows.",
     )
+    include_confidence: bool = Field(
+        default=False,
+        description="When True, the LLM self-assesses confidence for each field. "
+        "Scores are stored in ExtractionReport.field_confidences as numeric values "
+        "(1.0=very_high, 0.75=high, 0.5=moderate, 0.25=low, 0.0=very_low).",
+    )
 
     @field_validator("header_rows")
     @classmethod

@@ -229,6 +229,19 @@ class Extractor:
         if not any(source_cells):
             source_cells = []
 
+        # * Collect confidence from records (set by ExtractionEngine.extract)
+        field_confidences: dict[str, list[float]] | None = None
+        if items and hasattr(items[0], "_field_confidences"):
+            all_fields: set[str] = set()
+            for item in items:
+                per_record = getattr(item, "_field_confidences", {})
+                all_fields.update(per_record.keys())
+            field_confidences = {name: [] for name in sorted(all_fields)}
+            for item in items:
+                per_record = getattr(item, "_field_confidences", {})
+                for name in field_confidences:
+                    field_confidences[name].append(per_record.get(name, 0.5))
+
         usage = self._tracker.snapshot()
         logger.info(usage)
 
@@ -237,6 +250,7 @@ class Extractor:
             usage=usage,
             source_rows=source_rows,
             source_cells=source_cells,
+            field_confidences=field_confidences,
         )
         return ExtractionResult(items, report=report)
 
@@ -753,6 +767,7 @@ class Extractor:
             is_sampled=True,
             total_rows=full_sheet.row_count,
             track_provenance=config.track_provenance,
+            include_confidence=config.include_confidence,
         )
 
     async def _run_sheet_extraction(
