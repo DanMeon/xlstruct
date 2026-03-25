@@ -5,7 +5,8 @@ from unittest.mock import patch
 from pydantic import Field, create_model
 from typer.testing import CliRunner
 
-from xlstruct.cli import _render_schema_source, app
+from xlstruct.cli import app
+from xlstruct.suggest import render_schema_source
 
 runner = CliRunner()
 
@@ -17,7 +18,7 @@ class TestRenderSchemaSource:
             amount=(float, Field(description="Total amount")),
             name=(str, Field(description="Customer name")),
         )
-        source = _render_schema_source(Model)
+        source = render_schema_source(Model)
         assert "class Invoice(BaseModel):" in source
         assert "amount: float" in source
         assert "name: str" in source
@@ -28,7 +29,7 @@ class TestRenderSchemaSource:
             "Row",
             value=(float | None, Field(description="Optional value")),
         )
-        source = _render_schema_source(Model)
+        source = render_schema_source(Model)
         assert "float | None" in source
 
     def test_date_fields(self):
@@ -39,7 +40,7 @@ class TestRenderSchemaSource:
             start=(datetime.date, Field(description="Start date")),
             created=(datetime.datetime, Field(description="Created at")),
         )
-        source = _render_schema_source(Model)
+        source = render_schema_source(Model)
         assert "from datetime import date, datetime" in source
         assert "start: date" in source
         assert "created: datetime" in source

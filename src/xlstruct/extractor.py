@@ -401,6 +401,44 @@ class Extractor:
         """Synchronous wrapper for suggest_schema(). Jupyter-compatible."""
         return _run_sync(self.suggest_schema(source, **kwargs))  # type: ignore[no-any-return]
 
+    async def suggest_schema_source(
+        self,
+        source: str,
+        *,
+        sheet: str | None = None,
+        instructions: str | None = None,
+        **storage_options: Any,
+    ) -> str:
+        """Analyze an Excel file and return a suggested Pydantic schema as source code.
+
+        Combines ``suggest_schema()`` with source code rendering to produce
+        a ready-to-use Python module string containing the model class.
+
+        Args:
+            source: File path or URL (local, s3://, az://, gs://).
+            sheet: Target sheet name. None = first sheet.
+            instructions: Hints (e.g. "focus on financial columns").
+            **storage_options: Backend-specific storage options.
+
+        Returns:
+            Python source code string defining a Pydantic model class with
+            imports, field definitions, and descriptions.
+        """
+        from xlstruct.suggest import render_schema_source
+
+        model_cls = await self.suggest_schema(
+            source, sheet=sheet, instructions=instructions, **storage_options
+        )
+        return render_schema_source(model_cls)
+
+    def suggest_schema_source_sync(
+        self,
+        source: str,
+        **kwargs: Any,
+    ) -> str:
+        """Synchronous wrapper for suggest_schema_source(). Jupyter-compatible."""
+        return _run_sync(self.suggest_schema_source(source, **kwargs))  # type: ignore[no-any-return]
+
     # * Multi-sheet extraction
 
     async def extract_workbook(
