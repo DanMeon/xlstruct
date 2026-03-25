@@ -86,6 +86,10 @@ module = ["openpyxl.*", "fsspec.*", "calamine.*", "anthropic.*", "instructor.*",
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = "xlstruct.mcp_server"
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
 module = "xlstruct.codegen.backends.docker"
 disallow_untyped_calls = false
 
