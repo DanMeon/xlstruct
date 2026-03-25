@@ -61,7 +61,7 @@ docker = [
 formulas = ["formulas>=1.2"]
 
 [project.scripts]
-xlstruct = "xlstruct.cli:app"
+xlstruct = "xlstruct.cli:_cli_entry"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xlstruct"]
