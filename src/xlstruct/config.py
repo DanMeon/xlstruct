@@ -59,6 +59,12 @@ class ExtractorConfig(BaseModel):
         description="Directory for script cache. "
         "Defaults to ~/.xlstruct/cache/ when cache_enabled is True.",
     )
+    strict_formulas: bool = Field(
+        default=True,
+        description="When True, raise ReaderError if formula cells have no cached value "
+        "(common with Google Sheets exports). When False, log a warning and fall back "
+        "to showing the formula string instead of the computed value.",
+    )
     provider_options: dict[str, Any] = Field(default_factory=dict)
     storage_options: dict[str, Any] = Field(default_factory=dict)
 

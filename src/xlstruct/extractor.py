@@ -646,7 +646,13 @@ class Extractor:
             workbook = await asyncio.to_thread(csv_reader.read, file_bytes, sheet_name)
         else:
             reader = HybridReader()
-            workbook = await asyncio.to_thread(reader.read, file_bytes, sheet_name, source_ext=ext)
+            workbook = await asyncio.to_thread(
+                reader.read,
+                file_bytes,
+                sheet_name,
+                source_ext=ext,
+                strict_formulas=self._config.strict_formulas,
+            )
 
         workbook.file_name = source.rsplit("/", 1)[-1]
         workbook.file_size = len(file_bytes)

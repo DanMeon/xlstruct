@@ -8,6 +8,7 @@ Requires python-calamine >= 0.6.2.
 """
 
 import io
+import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -18,6 +19,8 @@ from openpyxl.utils import get_column_letter
 
 from xlstruct.exceptions import ErrorCode, ReaderError
 from xlstruct.schemas.core import CellData, SheetData, WorkbookData
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,6 +67,7 @@ class HybridReader:
         sheet_name: str | None = None,
         *,
         source_ext: str = ".xlsx",
+        strict_formulas: bool = True,
     ) -> WorkbookData:
         """Read an Excel file from bytes into WorkbookData.
 
@@ -72,6 +76,9 @@ class HybridReader:
             sheet_name: If provided, read only this sheet. None = all sheets.
             source_ext: File extension (e.g. ".xlsx", ".xls") to determine
                 whether Pass 2 (formula extraction) is possible.
+            strict_formulas: When True, raise ReaderError if formula cells
+                have no cached value. When False, log a warning and continue
+                (the LLM will see the formula string instead of the computed value).
         """
         buf = io.BytesIO(file_bytes)
 
@@ -113,8 +120,8 @@ class HybridReader:
         sheets: list[SheetData] = []
         for sn in target_sheets:
             sheet = self._build_sheet_data(calamine_data[sn])
-            # * Reject formula cells without cached values
-            self._check_uncached_formulas(sheet)
+            # * Check formula cells without cached values
+            self._check_uncached_formulas(sheet, strict=strict_formulas)
             sheets.append(sheet)
         return WorkbookData(sheets=sheets)
 
@@ -263,22 +270,36 @@ class HybridReader:
         )
 
     @staticmethod
-    def _check_uncached_formulas(sheet: SheetData) -> None:
-        """Raise if any formula cells have no cached value."""
+    def _check_uncached_formulas(sheet: SheetData, *, strict: bool = True) -> None:
+        """Check formula cells with no cached value.
+
+        When strict=True (default), raises ReaderError. When strict=False,
+        logs a warning — the LLM will see the formula string (e.g. '=B3*C3')
+        via CellData.display_value fallback instead of the computed value.
+        """
         uncached = [
             f"{get_column_letter(c.col)}{c.row}"
             for c in sheet.cells
             if c.formula and c.cached_value is None
         ]
-        if uncached:
-            sample = ", ".join(uncached[:5])
-            suffix = f" (and {len(uncached) - 5} more)" if len(uncached) > 5 else ""
+        if not uncached:
+            return
+
+        sample = ", ".join(uncached[:5])
+        suffix = f" (and {len(uncached) - 5} more)" if len(uncached) > 5 else ""
+        msg = (
+            f"Sheet '{sheet.name}': {len(uncached)} formula cell(s) have no cached value. "
+            f"Cells: {sample}{suffix}"
+        )
+
+        if strict:
             raise ReaderError(
-                f"Sheet '{sheet.name}': {len(uncached)} formula cell(s) have no cached value. "
-                f"Open the file in Excel and re-save to populate cached values. "
-                f"Cells: {sample}{suffix}",
+                f"{msg} Open the file in Excel and re-save to populate cached values.",
                 code=ErrorCode.READER_PARSE_FAILED,
             )
+
+        # ^ Non-strict: warn and continue — LLM sees formula strings as fallback
+        logger.warning("%s Formula strings will be used instead of computed values.", msg)
 
     @staticmethod
     def _infer_data_type(value: Any) -> str:
