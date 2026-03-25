@@ -7,7 +7,7 @@ Delegates code generation to CodegenOrchestrator.
 import asyncio
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable, Iterator
 from pathlib import Path as PathLibPath
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -304,6 +304,78 @@ class Extractor:
     ) -> ExtractionResult[T]:
         """Synchronous wrapper for extract(). Jupyter-compatible."""
         return _run_sync(self.extract(source, schema, **kwargs))  # type: ignore[no-any-return]
+
+    # * Streaming extraction
+
+    async def stream(
+        self,
+        source: str,
+        schema: type[T] | None = None,
+        *,
+        extraction_config: ExtractionConfig | None = None,
+        sheet: str | None = None,
+        instructions: str | None = None,
+        **storage_options: Any,
+    ) -> AsyncGenerator[T, None]:
+        """Stream extracted records as each chunk completes.
+
+        Same pipeline as ``extract()`` but yields individual records incrementally
+        instead of waiting for all chunks to finish. For large multi-chunk files
+        this means the caller receives records as soon as each chunk's LLM call
+        completes.
+
+        For codegen mode and single-chunk extractions, all records are yielded
+        at once (no partial streaming benefit, but the interface is consistent).
+
+        Args:
+            source: File path or URL (local, s3://, az://, gs://).
+            schema: (Legacy) Pydantic model class defining the target structure.
+            extraction_config: Per-extraction config with header_rows, output_schema.
+            sheet: Target sheet name. None = first sheet.
+            instructions: Optional natural-language hints for the LLM.
+            **storage_options: Backend-specific storage options.
+
+        Yields:
+            Individual ``T`` instances as they are extracted.
+        """
+        if extraction_config is not None:
+            async for item in self._stream_configured_extraction(
+                source, extraction_config, **storage_options
+            ):
+                yield item
+        elif schema is not None:
+            workbook = await self._load_workbook(source, sheet_name=sheet, **storage_options)
+            target_sheet = workbook.sheets[0]
+            async for item in self._stream_sheet_extraction(
+                target_sheet, schema, instructions, engine=self._engine
+            ):
+                yield item
+        else:
+            raise ValueError("Either schema or extraction_config must be provided")
+
+    def stream_sync(
+        self,
+        source: str,
+        schema: type[T] | None = None,
+        **kwargs: Any,
+    ) -> Iterator[T]:
+        """Synchronous wrapper for stream(). Jupyter-compatible.
+
+        Returns a regular ``Iterator[T]`` by collecting all records from the
+        async generator. This does not provide true incremental streaming to
+        the caller (all records are collected before returning), but it
+        preserves the same interface contract.
+
+        For true incremental streaming, use ``async for item in extractor.stream(...)``.
+        """
+
+        async def _collect() -> list[T]:
+            results: list[T] = []
+            async for item in self.stream(source, schema, **kwargs):
+                results.append(item)
+            return results
+
+        return iter(_run_sync(_collect()))
 
     async def suggest_schema(
         self,
@@ -833,3 +905,91 @@ class Extractor:
             # * Single-pass extraction
             encoded = encoder.encode(sheet)
             return await target_engine.extract(encoded, schema, instructions)
+
+    # * Streaming private helpers
+
+    async def _stream_configured_extraction(
+        self,
+        source: str,
+        config: ExtractionConfig,
+        **storage_options: Any,
+    ) -> AsyncGenerator[Any, None]:
+        """Streaming variant of _run_configured_extraction.
+
+        For codegen mode, yields all records at once (script produces all results
+        in a single run). For direct mode, yields records as each chunk completes.
+        """
+        workbook = await self._load_workbook(source, sheet_name=config.sheet, **storage_options)
+        full_sheet = workbook.sheets[0]
+
+        # * Auto-detect header rows if not provided (requires codegen orchestrator)
+        header_rows = config.header_rows
+        if header_rows is None:
+            codegen = self._get_codegen()
+            header_rows = await codegen.detect_header_rows(full_sheet)
+
+        # * Resolve mode
+        mode = config.mode
+        if mode == ExtractionMode.AUTO:
+            max_header_row = max(header_rows)
+            data_rows = full_sheet.row_count - max_header_row
+            if data_rows > SAMPLE_ROWS:
+                mode = ExtractionMode.CODEGEN
+            else:
+                mode = ExtractionMode.DIRECT
+            logger.info(
+                "Auto-routing (stream): %d data rows → mode=%s",
+                data_rows,
+                mode.value,
+            )
+
+        if mode == ExtractionMode.CODEGEN:
+            codegen = self._get_codegen()
+            items = await self._run_codegen(source, full_sheet, header_rows, config, codegen)
+            for item in items:
+                yield item
+            return
+
+        # * Direct mode — single-pass with sampling (no chunking in config mode)
+        encoder = CompressedEncoder(sample_size=SAMPLE_ROWS)
+        encoded = encoder.encode(full_sheet, header_rows=header_rows)
+        items = await self._engine.extract(
+            encoded,
+            config.output_schema,
+            config.instructions,
+            is_sampled=True,
+            total_rows=full_sheet.row_count,
+            track_provenance=config.track_provenance,
+        )
+        for item in items:
+            yield item
+
+    async def _stream_sheet_extraction(
+        self,
+        sheet: SheetData,
+        schema: type[T],
+        instructions: str | None = None,
+        *,
+        engine: ExtractionEngine,
+    ) -> AsyncGenerator[T, None]:
+        """Streaming variant of _run_sheet_extraction.
+
+        Yields records incrementally as each chunk's LLM call completes.
+        For single-chunk sheets, yields all records at once.
+        """
+        encoder = CompressedEncoder()
+
+        if needs_chunking(sheet, self._config.token_budget):
+            # * Chunked extraction — yield from each chunk as it completes
+            chunks = self._chunk_splitter.split(sheet, self._config.token_budget)
+            for chunk in chunks:
+                encoded = encoder.encode(chunk)
+                partial = await engine.extract(encoded, schema, instructions)
+                for item in partial:
+                    yield item
+        else:
+            # * Single-pass extraction
+            encoded = encoder.encode(sheet)
+            items = await engine.extract(encoded, schema, instructions)
+            for item in items:
+                yield item
