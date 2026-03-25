@@ -2,18 +2,43 @@
 
 Uses Python stdlib csv module — no extra dependencies.
 CSV has no formulas, merged cells, or multi-sheet support.
+Dialect (delimiter, quoting) is auto-detected via ``csv.Sniffer``.
 """
 
 import csv
 import io
+import logging
 
 from openpyxl.utils import get_column_letter
 
 from xlstruct.schemas.core import CellData, SheetData, WorkbookData
 
+log = logging.getLogger(__name__)
+
+# ^ Sample size for csv.Sniffer — 8 KB covers most header + first rows.
+_SNIFF_SAMPLE_BYTES = 8192
+
 
 class CsvReader:
     """Read CSV bytes into WorkbookData (single sheet)."""
+
+    # * Dialect detection
+
+    @staticmethod
+    def _detect_dialect(text: str) -> csv.Dialect | None:
+        """Sniff the CSV dialect from the first ~8 KB of *text*.
+
+        Returns:
+            Detected ``csv.Dialect`` or ``None`` when detection fails.
+        """
+        sample = text[:_SNIFF_SAMPLE_BYTES]
+        try:
+            dialect: csv.Dialect = csv.Sniffer().sniff(sample)  # type: ignore[assignment]
+            return dialect
+        except csv.Error:
+            return None
+
+    # * Public API
 
     def read(
         self,
@@ -33,7 +58,15 @@ class CsvReader:
             WorkbookData with a single SheetData entry named "Sheet1".
         """
         text = file_bytes.decode(encoding)
-        reader = csv.reader(io.StringIO(text))
+
+        # * Dialect auto-detection
+        dialect = self._detect_dialect(text)
+        if dialect is not None:
+            log.debug("CSV dialect detected: delimiter=%r", dialect.delimiter)
+            reader = csv.reader(io.StringIO(text), dialect=dialect)
+        else:
+            log.debug("CSV dialect detection failed — falling back to comma delimiter")
+            reader = csv.reader(io.StringIO(text))
 
         cells: list[CellData] = []
         row_count = 0
