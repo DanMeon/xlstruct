@@ -160,7 +160,7 @@ def create_mcp_server() -> Any:
 
     # * Tool: extract
 
-    @mcp.tool()  # type: ignore[untyped-decorator]
+    @mcp.tool()
     async def extract(
         source: str,
         schema_json: str,
@@ -221,7 +221,7 @@ def create_mcp_server() -> Any:
 
     # * Tool: suggest_schema
 
-    @mcp.tool()  # type: ignore[untyped-decorator]
+    @mcp.tool()
     async def suggest_schema(
         source: str,
         sheet: str | None = None,
@@ -249,7 +249,7 @@ def create_mcp_server() -> Any:
 
     # * Tool: generate_script
 
-    @mcp.tool()  # type: ignore[untyped-decorator]
+    @mcp.tool()
     async def generate_script(
         source: str,
         schema_json: str,
@@ -288,7 +288,7 @@ def create_mcp_server() -> Any:
 
     # * Tool: extract_batch
 
-    @mcp.tool()  # type: ignore[untyped-decorator]
+    @mcp.tool()
     async def extract_batch(
         sources: list[str],
         schema_json: str,
@@ -351,7 +351,7 @@ def create_mcp_server() -> Any:
 
     # * Tool: inspect_sheet
 
-    @mcp.tool()  # type: ignore[untyped-decorator]
+    @mcp.tool()
     async def inspect_sheet(
         source: str,
         sheet: str | None = None,
@@ -398,7 +398,7 @@ def create_mcp_server() -> Any:
 
     # * Tool: cache_list
 
-    @mcp.tool()  # type: ignore[untyped-decorator]
+    @mcp.tool()
     async def cache_list() -> str:
         """List cached codegen scripts.
 
@@ -420,7 +420,7 @@ def create_mcp_server() -> Any:
 
     # * Tool: cache_clear
 
-    @mcp.tool()  # type: ignore[untyped-decorator]
+    @mcp.tool()
     async def cache_clear(signature: str | None = None) -> str:
         """Clear cached codegen scripts.
 

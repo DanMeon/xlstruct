@@ -144,7 +144,7 @@ class ExtractionEngine:
             response_schema = _build_provenance_schema(response_schema)
         if include_confidence:
             # ^ Exclude provenance-added fields so they don't get confidence counterparts
-            provenance_fields = {"source_rows"} if track_provenance else None
+            provenance_fields = {"source_rows", "source_cells"} if track_provenance else None
             response_schema = _build_confidence_schema(
                 response_schema, exclude_fields=provenance_fields
             )
