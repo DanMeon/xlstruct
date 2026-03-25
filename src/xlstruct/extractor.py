@@ -632,6 +632,104 @@ class Extractor:
             self.extract_workbook(source, sheet_schemas, **kwargs)
         )
 
+    # * Cross-sheet extraction
+
+    async def extract_cross_sheet(
+        self,
+        source: str,
+        *,
+        schema: type[T],
+        sheets: list[str],
+        header_rows: dict[str, list[int]] | list[int] | None = None,
+        instructions: str | None = None,
+        **storage_options: Any,
+    ) -> ExtractionResult[T]:
+        """Extract structured data by combining multiple sheets into a single LLM call.
+
+        Unlike extract_workbook (one schema per sheet), this method encodes multiple
+        sheets and sends the combined representation to a single LLM extraction call,
+        producing a unified list of records. Useful when related data is split across
+        sheets (e.g. Q1/Q2/Q3 tabs) and must be merged into one schema.
+
+        Args:
+            source: File path or URL (local, s3://, az://, gs://).
+            schema: Pydantic model class defining the target structure.
+            sheets: Sheet names to include (minimum 2).
+            header_rows: Header row specification. Can be:
+                - None: auto-detect per sheet.
+                - list[int]: same header rows applied to all sheets.
+                - dict[str, list[int]]: per-sheet header rows keyed by sheet name.
+            instructions: Optional natural-language hints for the LLM.
+            **storage_options: Backend-specific storage options.
+
+        Returns:
+            ExtractionResult — list[T] with ``.report`` for extraction metadata.
+
+        Raises:
+            ValueError: If fewer than 2 sheets are specified or a sheet is not found.
+        """
+        if len(sheets) < 2:
+            raise ValueError(f"extract_cross_sheet requires at least 2 sheets, got {len(sheets)}")
+
+        self._tracker.reset()
+
+        # * Load entire workbook (all sheets)
+        workbook = await self._load_workbook(source, sheet_name=None, **storage_options)
+
+        # * Validate all requested sheets exist
+        missing = [s for s in sheets if workbook.get_sheet(s) is None]
+        if missing:
+            raise ValueError(f"Sheets not found: {missing}. Available: {workbook.sheet_names}")
+
+        # * Encode each sheet separately and concatenate
+        encoder = CompressedEncoder(sample_size=SAMPLE_ROWS)
+        encoded_parts: list[str] = []
+        for sheet_name in sheets:
+            sheet_data = workbook.get_sheet(sheet_name)
+            assert sheet_data is not None  # ^ Already validated above
+
+            # * Resolve header_rows for this sheet
+            sheet_header_rows: list[int] | None
+            if header_rows is None:
+                sheet_header_rows = None
+            elif isinstance(header_rows, list):
+                sheet_header_rows = header_rows
+            else:
+                sheet_header_rows = header_rows.get(sheet_name)
+
+            encoded_parts.append(encoder.encode(sheet_data, header_rows=sheet_header_rows))
+
+        combined_encoding = "\n\n".join(encoded_parts)
+
+        # * Send combined encoding to ExtractionEngine
+        items = await self._engine.extract(
+            combined_encoding,
+            schema,
+            instructions,
+        )
+
+        usage = self._tracker.snapshot()
+        logger.info(usage)
+
+        report = ExtractionReport(
+            mode=ExtractionMode.DIRECT,
+            usage=usage,
+        )
+        return ExtractionResult(items, report=report)
+
+    def extract_cross_sheet_sync(
+        self,
+        source: str,
+        *,
+        schema: type[T],
+        sheets: list[str],
+        **kwargs: Any,
+    ) -> ExtractionResult[T]:
+        """Synchronous wrapper for extract_cross_sheet(). Jupyter-compatible."""
+        return _run_sync(  # type: ignore[no-any-return]
+            self.extract_cross_sheet(source, schema=schema, sheets=sheets, **kwargs)
+        )
+
     # * Batch extraction
 
     async def extract_batch(
