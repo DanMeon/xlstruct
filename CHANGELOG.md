@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-03
+
+### Added
+
+- **Configurable chunking thresholds** — `min_chunk_rows` and `chunking_row_threshold` fields in `ExtractorConfig`
+- **Cross-sheet token budget validation** — `extract_cross_sheet()` raises `ExtractionError` when combined encoding exceeds `token_budget`
+- **MCP schema builder: complex types** — `build_model_from_schema_json()` now supports `list`, nested `object`, and `enum` types
+- **Codegen MappingPlan validation** — empty mappings warn, duplicate `schema_field` entries are auto-deduplicated between Phase 0 and Phase 1
+- **CSV ISO date inference** — `CsvReader` detects ISO date/datetime strings and sets `data_type="d"`
+- **Sandbox getattr detection** — `scan_blocked_imports()` detects `getattr()`/`setattr()`/`delattr()` calls with blocked dunder string arguments
+
+### Fixed
+
+- **CSV BOM handling** — UTF-8 BOM (`\ufeff`) is now stripped automatically via `utf-8-sig` encoding
+- **Record filter data loss** — `_filter_by_required_fields()` no longer drops records with empty-string (`""`) required fields
+
+### Changed
+
+- `ExtractorConfig` numeric fields now have Pydantic `Field` constraints (`token_budget: gt=0`, `temperature: ge=0, le=2.0`, etc.)
+- `count_tokens()` utility added to `_tokens.py` for plain text token counting
+
 ## [0.5.0] - 2026-03-25
 
 ### Added
