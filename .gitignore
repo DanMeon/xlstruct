@@ -22,7 +22,6 @@ generated/
 
 # * Testing
 .pytest_cache/
-.mypy_cache/
 .ruff_cache/
 tests/fixtures/data/
 

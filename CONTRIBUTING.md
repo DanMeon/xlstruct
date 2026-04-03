@@ -6,7 +6,7 @@ Thanks for your interest in contributing! AI-assisted contributions (issue creat
 
 - `uv sync --group dev` to install dependencies
 - `uv run pytest tests/ -v --ignore=tests/integration` must pass
-- `uv run ruff check src/ tests/` and `uv run mypy src/xlstruct/` must pass
+- `uv run ruff check src/ tests/` and `uv run pyright src/xlstruct/` must pass
 - Pre-commit hooks run these automatically
 
 ## Code Style

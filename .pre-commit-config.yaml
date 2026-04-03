@@ -15,9 +15,9 @@ repos:
         pass_filenames: false
         types: [python]
 
-      - id: mypy
-        name: mypy
-        entry: uv run mypy src/xlstruct/
+      - id: pyright
+        name: pyright
+        entry: uv run pyright src/xlstruct/
         language: system
         pass_filenames: false
         types: [python]

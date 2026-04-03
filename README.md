@@ -532,7 +532,7 @@ XLStructError (base)                    code
 uv sync                            # Install dependencies
 uv run pytest tests/ -v            # Run all tests
 uv run ruff check src/ tests/      # Lint
-uv run mypy src/xlstruct/          # Type check
+uv run pyright src/xlstruct/          # Type check
 ```
 
 ## License
