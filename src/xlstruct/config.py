@@ -32,12 +32,12 @@ class ExtractorConfig(BaseModel):
 
     provider: str = "anthropic/claude-sonnet-4-6"
     api_key: SecretStr | None = None
-    max_retries: int = 3
-    token_budget: int = 100_000
-    temperature: float = 0.0
-    max_tokens: int = 8192
-    max_codegen_retries: int = 3
-    codegen_timeout: int = 60
+    max_retries: int = Field(default=3, ge=0)
+    token_budget: int = Field(default=100_000, gt=0)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=8192, gt=0)
+    max_codegen_retries: int = Field(default=3, ge=0)
+    codegen_timeout: int = Field(default=60, gt=0)
     thinking: bool = Field(
         default=False,
         description="Enable Anthropic extended thinking mode. "
@@ -69,6 +69,16 @@ class ExtractorConfig(BaseModel):
         default=False,
         description="Evaluate formula cells using the formulas library. "
         "Requires: pip install xlstruct[formulas]",
+    )
+    min_chunk_rows: int = Field(
+        default=10,
+        gt=0,
+        description="Minimum rows per chunk to avoid degenerate cases.",
+    )
+    chunking_row_threshold: int = Field(
+        default=100,
+        gt=0,
+        description="Force chunking for sheets exceeding this row count.",
     )
     provider_options: dict[str, Any] = Field(default_factory=dict)
     storage_options: dict[str, Any] = Field(default_factory=dict)

@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 """MCP server for XLStruct — exposes extraction capabilities as tools.
 
 Requires the 'mcp' optional dependency:
@@ -16,7 +17,7 @@ import datetime
 import json
 import logging
 from pathlib import Path as PathLibPath
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, create_model
 
@@ -88,15 +89,39 @@ def build_model_from_schema_json(schema_json: str) -> type[BaseModel]:
         nullable = field_spec.get("nullable", False)
         description = field_spec.get("description")
 
-        python_type = TYPE_MAP.get(type_str.lower())
-        if python_type is None:
-            raise ValueError(
-                f"Unknown type '{type_str}' for field '{field_name}'. "
-                f"Supported: {', '.join(sorted(TYPE_MAP.keys()))}"
-            )
+        # * Resolve python_type based on type_str
+        if type_str.lower() == "list":
+            items_type_str = field_spec.get("items", "str")
+            items_type = TYPE_MAP.get(items_type_str.lower())
+            if items_type is None:
+                raise ValueError(
+                    f"Unknown items type '{items_type_str}' for list field '{field_name}'. "
+                    f"Supported: {', '.join(sorted(TYPE_MAP.keys()))}"
+                )
+            python_type = list[items_type]  # type: ignore[valid-type]
+        elif type_str.lower() == "object":
+            properties = field_spec.get("properties", {})
+            if not properties:
+                raise ValueError(f"Object field '{field_name}' requires non-empty 'properties'")
+            # ^ Recursive call to build nested model
+            nested_schema_json = json.dumps(properties)
+            python_type = build_model_from_schema_json(nested_schema_json)  # type: ignore[assignment]
+            python_type.__name__ = field_name.title().replace("_", "")
+        elif type_str.lower() == "enum":
+            values = field_spec.get("values", [])
+            if not values:
+                raise ValueError(f"Enum field '{field_name}' requires non-empty 'values' list")
+            python_type = Literal[tuple(values)]  # type: ignore[valid-type]
+        else:
+            python_type = TYPE_MAP.get(type_str.lower())
+            if python_type is None:
+                raise ValueError(
+                    f"Unknown type '{type_str}' for field '{field_name}'. "
+                    f"Supported: {', '.join(sorted(TYPE_MAP.keys()))}"
+                )
 
         if nullable:
-            python_type = python_type | None  # type: ignore[assignment]
+            python_type = python_type | None  # type: ignore
 
         if description:
             field_definitions[field_name] = (python_type, Field(description=description))
@@ -131,7 +156,7 @@ def _validate_source(source: str) -> None:
 async def _load_sheet(source: str, sheet: str | None = None) -> SheetData:
     """Load a single sheet from a file for inspection."""
     file_bytes = await read_file(source)
-    ext = Extractor._get_source_ext(source)
+    ext = Extractor._get_source_ext(source)  # pyright: ignore[reportPrivateUsage]
 
     if ext == ".csv":
         from xlstruct.reader.csv_reader import CsvReader

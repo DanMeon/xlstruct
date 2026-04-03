@@ -31,14 +31,14 @@ class CodegenEngine:
         """Create async Instructor client with provider-specific kwargs."""
         # ^ Anthropic thinking requires ANTHROPIC_REASONING_TOOLS mode
         if self._config.thinking and self._config.provider.startswith("anthropic/"):
-            from anthropic import AsyncAnthropic
+            from anthropic import AsyncAnthropic  # type: ignore
 
             model = self._config.provider.split("/", 1)[1]
             client_kwargs: dict[str, Any] = {}
             if self._config.api_key:
                 client_kwargs["api_key"] = self._config.api_key.get_secret_value()
-            client = instructor.from_anthropic(
-                AsyncAnthropic(**client_kwargs),
+            client = instructor.from_anthropic(  # type: ignore
+                AsyncAnthropic(**client_kwargs),  # type: ignore
                 mode=instructor.Mode.ANTHROPIC_REASONING_TOOLS,
             )
             # ^ Store model name for create() calls
@@ -85,7 +85,7 @@ class CodegenEngine:
             )
             if self._tracker:
                 self._tracker.record(label, completion)
-            return result  # type: ignore[no-any-return]
+            return result  # type: ignore
         except Exception as e:
             raise ExtractionError(f"{error_msg}: {e}", code=ErrorCode.EXTRACTION_LLM_FAILED) from e
 

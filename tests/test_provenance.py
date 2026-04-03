@@ -68,7 +68,7 @@ class TestSplitProvenance:
         ]
         result = ExtractionEngine._split_provenance(items, Product)
         assert len(result) == 1
-        assert result[0]._source_rows == [2]  # type: ignore[attr-defined]
+        assert result[0]._source_rows == [2]  # type: ignore
 
     def test_extracts_source_cells(self):
         wrapper_schema = _build_provenance_schema(Product)
@@ -82,7 +82,7 @@ class TestSplitProvenance:
             ),
         ]
         result = ExtractionEngine._split_provenance(items, Product)
-        assert result[0]._source_cells == {"name": "A2", "price": "B2", "stock": "C2"}  # type: ignore[attr-defined]
+        assert result[0]._source_cells == {"name": "A2", "price": "B2", "stock": "C2"}  # type: ignore
 
     def test_original_schema_intact(self):
         """Returned records should be instances of the original schema without provenance fields."""
@@ -117,7 +117,7 @@ class TestSplitProvenance:
             ),
         ]
         result = ExtractionEngine._split_provenance(items, Product)
-        assert result[0]._source_cells == {}  # type: ignore[attr-defined]
+        assert result[0]._source_cells == {}  # type: ignore
 
     def test_multiple_records(self):
         wrapper_schema = _build_provenance_schema(Product)
@@ -139,8 +139,8 @@ class TestSplitProvenance:
         ]
         result = ExtractionEngine._split_provenance(items, Product)
         assert len(result) == 2
-        assert result[0]._source_cells == {"name": "A2", "price": "B2", "stock": "C2"}  # type: ignore[attr-defined]
-        assert result[1]._source_cells == {"name": "A3", "price": "B3", "stock": "C3"}  # type: ignore[attr-defined]
+        assert result[0]._source_cells == {"name": "A2", "price": "B2", "stock": "C2"}  # type: ignore
+        assert result[1]._source_cells == {"name": "A3", "price": "B3", "stock": "C3"}  # type: ignore
 
 
 # * ExtractionReport tests

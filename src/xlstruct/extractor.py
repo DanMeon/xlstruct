@@ -12,10 +12,11 @@ from pathlib import Path as PathLibPath
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
-    from pandas import DataFrame  # type: ignore[import-untyped]
+    from pandas import DataFrame  # type: ignore
 
 from pydantic import BaseModel, SecretStr
 
+from xlstruct._tokens import count_tokens
 from xlstruct.codegen.backends.base import ExecutionBackend
 from xlstruct.codegen.cache import ScriptCache, compute_structure_signature
 from xlstruct.codegen.orchestrator import CodegenOrchestrator
@@ -28,7 +29,7 @@ from xlstruct.config import (
     build_instructor_client,
 )
 from xlstruct.encoder.compressed import CompressedEncoder
-from xlstruct.exceptions import ErrorCode, ReaderError
+from xlstruct.exceptions import ErrorCode, ExtractionError, ReaderError
 from xlstruct.extraction.chunking import ChunkSplitter, needs_chunking
 from xlstruct.extraction.engine import ExtractionEngine
 from xlstruct.reader.hybrid_reader import HybridReader
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
-class ExtractionResult(list[T]):  # type: ignore[type-var,unused-ignore]
+class ExtractionResult(list[T]):  # type: ignore
     """List of extracted records with an attached extraction report.
 
     Behaves exactly like list[T] (iteration, indexing, len, etc.)
@@ -92,9 +93,9 @@ def _run_sync(coro: Any) -> Any:
 
     # ^ Running inside an existing event loop (Jupyter, etc.)
     try:
-        import nest_asyncio  # type: ignore[import-not-found]
+        import nest_asyncio  # type: ignore
 
-        nest_asyncio.apply()
+        nest_asyncio.apply()  # type: ignore
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(coro)
     except ImportError:
@@ -292,7 +293,7 @@ class Extractor:
         **storage_options: Any,
     ) -> GeneratedScript:
         """Synchronous wrapper for generate_script(). Jupyter-compatible."""
-        return _run_sync(  # type: ignore[no-any-return]
+        return _run_sync(  # type: ignore
             self.generate_script(source, extraction_config, **storage_options)
         )
 
@@ -303,7 +304,7 @@ class Extractor:
         **kwargs: Any,
     ) -> ExtractionResult[T]:
         """Synchronous wrapper for extract(). Jupyter-compatible."""
-        return _run_sync(self.extract(source, schema, **kwargs))  # type: ignore[no-any-return]
+        return _run_sync(self.extract(source, schema, **kwargs))  # type: ignore
 
     # * Streaming extraction
 
@@ -457,7 +458,7 @@ class Extractor:
         for f in result.fields:
             python_type = type_map.get(f.type, str)
             if f.nullable:
-                python_type = python_type | None  # type: ignore[assignment]
+                python_type = python_type | None  # type: ignore
             field_definitions[f.name] = (
                 python_type,
                 Field(description=f.description),
@@ -471,7 +472,7 @@ class Extractor:
         **kwargs: Any,
     ) -> type[BaseModel]:
         """Synchronous wrapper for suggest_schema(). Jupyter-compatible."""
-        return _run_sync(self.suggest_schema(source, **kwargs))  # type: ignore[no-any-return]
+        return _run_sync(self.suggest_schema(source, **kwargs))  # type: ignore
 
     async def suggest_schema_source(
         self,
@@ -509,7 +510,7 @@ class Extractor:
         **kwargs: Any,
     ) -> str:
         """Synchronous wrapper for suggest_schema_source(). Jupyter-compatible."""
-        return _run_sync(self.suggest_schema_source(source, **kwargs))  # type: ignore[no-any-return]
+        return _run_sync(self.suggest_schema_source(source, **kwargs))  # type: ignore
 
     # * Multi-sheet extraction
 
@@ -628,7 +629,7 @@ class Extractor:
         **kwargs: Any,
     ) -> WorkbookResult:
         """Synchronous wrapper for extract_workbook(). Jupyter-compatible."""
-        return _run_sync(  # type: ignore[no-any-return]
+        return _run_sync(  # type: ignore
             self.extract_workbook(source, sheet_schemas, **kwargs)
         )
 
@@ -701,6 +702,16 @@ class Extractor:
 
         combined_encoding = "\n\n".join(encoded_parts)
 
+        # * Validate combined encoding fits within token budget
+        combined_tokens = count_tokens(combined_encoding)
+        if combined_tokens > self._config.token_budget:
+            raise ExtractionError(
+                f"Combined cross-sheet encoding ({combined_tokens:,} tokens) exceeds "
+                f"token budget ({self._config.token_budget:,}). "
+                f"Reduce the number of sheets or increase token_budget.",
+                code=ErrorCode.EXTRACTION_LLM_FAILED,
+            )
+
         # * Send combined encoding to ExtractionEngine
         items = await self._engine.extract(
             combined_encoding,
@@ -726,7 +737,7 @@ class Extractor:
         **kwargs: Any,
     ) -> ExtractionResult[T]:
         """Synchronous wrapper for extract_cross_sheet(). Jupyter-compatible."""
-        return _run_sync(  # type: ignore[no-any-return]
+        return _run_sync(  # type: ignore
             self.extract_cross_sheet(source, schema=schema, sheets=sheets, **kwargs)
         )
 
@@ -801,7 +812,7 @@ class Extractor:
                 except Exception as e:
                     logger.warning("Batch extraction failed for %s: %s", source, e)
                     error_msg = f"{type(e).__name__}: {e}"
-                    file_result = FileResult(
+                    file_result = FileResult[T](
                         source=source,
                         success=False,
                         error=error_msg,
@@ -835,7 +846,7 @@ class Extractor:
         **kwargs: Any,
     ) -> BatchResult[T]:
         """Synchronous wrapper for extract_batch(). Jupyter-compatible."""
-        return _run_sync(  # type: ignore[no-any-return]
+        return _run_sync(  # type: ignore
             self.extract_batch(sources, schema, **kwargs)
         )
 
@@ -941,6 +952,7 @@ class Extractor:
     ) -> list[Any]:
         """Code generation pipeline: cache lookup → generate script → execute → parse."""
         script: GeneratedScript | None = None
+        signature: str | None = None
 
         # * Cache lookup
         if self._cache is not None:
@@ -953,7 +965,7 @@ class Extractor:
             self._export_script(source, script)
 
             # * Store in cache
-            if self._cache is not None:
+            if self._cache is not None and signature is not None:
                 self._cache.put(signature, script, full_sheet, header_rows, config.output_schema)
 
         return await codegen.run_extraction(source, script, config.output_schema)
@@ -990,9 +1002,14 @@ class Extractor:
         target_engine = engine
         encoder = CompressedEncoder()
 
-        if needs_chunking(sheet, self._config.token_budget):
+        if needs_chunking(sheet, self._config.token_budget, self._config.chunking_row_threshold):
             # * Chunked extraction
-            chunks = self._chunk_splitter.split(sheet, self._config.token_budget)
+            chunks = self._chunk_splitter.split(
+                sheet,
+                self._config.token_budget,
+                min_chunk_rows=self._config.min_chunk_rows,
+                row_threshold=self._config.chunking_row_threshold,
+            )
             all_results: list[T] = []
             for chunk in chunks:
                 encoded = encoder.encode(chunk)
@@ -1077,9 +1094,14 @@ class Extractor:
         """
         encoder = CompressedEncoder()
 
-        if needs_chunking(sheet, self._config.token_budget):
+        if needs_chunking(sheet, self._config.token_budget, self._config.chunking_row_threshold):
             # * Chunked extraction — yield from each chunk as it completes
-            chunks = self._chunk_splitter.split(sheet, self._config.token_budget)
+            chunks = self._chunk_splitter.split(
+                sheet,
+                self._config.token_budget,
+                min_chunk_rows=self._config.min_chunk_rows,
+                row_threshold=self._config.chunking_row_threshold,
+            )
             for chunk in chunks:
                 encoded = encoder.encode(chunk)
                 partial = await engine.extract(encoded, schema, instructions)

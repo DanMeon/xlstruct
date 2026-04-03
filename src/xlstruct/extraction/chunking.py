@@ -11,9 +11,13 @@ _MIN_CHUNK_ROWS = 10
 _CHUNKING_ROW_THRESHOLD = 100
 
 
-def needs_chunking(sheet: SheetData, token_budget: int) -> bool:
+def needs_chunking(
+    sheet: SheetData,
+    token_budget: int,
+    row_threshold: int = _CHUNKING_ROW_THRESHOLD,
+) -> bool:
     """Check if a sheet needs to be split into chunks for extraction."""
-    if sheet.row_count > _CHUNKING_ROW_THRESHOLD:
+    if sheet.row_count > row_threshold:
         return True
     estimated = estimate_sheet_tokens(sheet)
     return estimated > token_budget
@@ -30,6 +34,9 @@ class ChunkSplitter:
         self,
         sheet: SheetData,
         token_budget: int,
+        *,
+        min_chunk_rows: int = _MIN_CHUNK_ROWS,
+        row_threshold: int = _CHUNKING_ROW_THRESHOLD,
     ) -> list[SheetData]:
         """Split sheet into chunks for extraction.
 
@@ -67,10 +74,10 @@ class ChunkSplitter:
         if total_tokens > token_budget:
             # ^ Token-based: split proportionally
             chunk_count = max(1, total_tokens // token_budget)
-            rows_per_chunk = max(_MIN_CHUNK_ROWS, data_row_count // chunk_count)
+            rows_per_chunk = max(min_chunk_rows, data_row_count // chunk_count)
         else:
             # ^ Row-based: cap at threshold
-            rows_per_chunk = max(_MIN_CHUNK_ROWS, _CHUNKING_ROW_THRESHOLD)
+            rows_per_chunk = max(min_chunk_rows, row_threshold)
 
         # * Build chunks
         chunks: list[SheetData] = []

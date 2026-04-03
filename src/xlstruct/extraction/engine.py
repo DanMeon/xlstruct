@@ -158,7 +158,7 @@ class ExtractionEngine:
                 self._config.provider,
             )
             result, completion = await self._client.create_with_completion(
-                response_model=list[response_schema],  # type: ignore[valid-type]
+                response_model=list[response_schema],  # type: ignore
                 messages=messages,
                 max_retries=self._config.max_retries,
                 temperature=self._config.temperature,
@@ -185,9 +185,9 @@ class ExtractionEngine:
                     for field_name, scores in field_confidences.items():
                         if i < len(scores):
                             per_record[field_name] = scores[i]
-                    item._field_confidences = per_record
+                    object.__setattr__(item, "_field_confidences", per_record)
 
-            return items
+            return items  # type: ignore
         except Exception as e:
             raise ExtractionError(
                 f"LLM extraction failed: {e}", code=ErrorCode.EXTRACTION_LLM_FAILED
@@ -206,7 +206,7 @@ class ExtractionEngine:
             source_rows = data.pop("source_rows", [])
             source_cells = data.pop("source_cells", {})
             record = original_schema.model_validate(data)
-            record._source_rows = source_rows  # type: ignore[attr-defined]
-            record._source_cells = source_cells  # type: ignore[attr-defined]
+            object.__setattr__(record, "_source_rows", source_rows)
+            object.__setattr__(record, "_source_cells", source_cells)
             cleaned.append(record)
         return cleaned

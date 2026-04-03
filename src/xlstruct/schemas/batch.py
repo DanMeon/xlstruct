@@ -15,7 +15,7 @@ class FileResult(BaseModel, Generic[T]):
 
     source: str = Field(description="File path or URL that was processed")
     success: bool = Field(description="Whether extraction succeeded")
-    records: list[T] = Field(default_factory=list, description="Extracted records")
+    records: list[T] = Field(default_factory=lambda: [], description="Extracted records")
     error: str | None = Field(default=None, description="Error message if extraction failed")
     usage: TokenUsage | None = Field(default=None, description="Token usage for this file")
 
@@ -23,7 +23,7 @@ class FileResult(BaseModel, Generic[T]):
 class BatchResult(BaseModel, Generic[T]):
     """Aggregated result of a batch extraction."""
 
-    results: list[FileResult[T]] = Field(default_factory=list)
+    results: list[FileResult[T]] = Field(default_factory=lambda: [])
 
     @property
     def succeeded(self) -> int:
@@ -58,7 +58,7 @@ class BatchResult(BaseModel, Generic[T]):
                 items.extend(r.records)
         return items
 
-    def __iter__(self) -> Iterator[FileResult[T]]:  # type: ignore[override]
+    def __iter__(self) -> Iterator[FileResult[T]]:  # type: ignore
         return iter(self.results)
 
     def __len__(self) -> int:

@@ -49,11 +49,11 @@ def _apply_resource_limits() -> None:
         import resource
 
         # ^ 512MB memory limit
-        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024**2,) * 2)
+        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024**2, 512 * 1024**2))
         # ^ 64 file descriptors
         resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
         # ^ 50MB max file write size
-        resource.setrlimit(resource.RLIMIT_FSIZE, (50 * 1024**2,) * 2)
+        resource.setrlimit(resource.RLIMIT_FSIZE, (50 * 1024**2, 50 * 1024**2))
     except (ImportError, ValueError, OSError) as e:
         logger.warning("Failed to set resource limits: %s", e)
 

@@ -100,7 +100,7 @@ def evaluate_sheet_formulas(sheet: SheetData) -> SheetData:
                 import numpy as np
 
                 if isinstance(value, np.ndarray):
-                    value = value.item() if value.size == 1 else value.flat[0]
+                    value = value.item() if value.size == 1 else value.flat[0]  # type: ignore
                 # ^ Convert numpy scalar types to Python native
                 if isinstance(value, np.integer):
                     value = int(value)

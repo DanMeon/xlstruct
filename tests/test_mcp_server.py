@@ -96,6 +96,50 @@ class TestBuildModelFromSchemaJson:
         dumped = instance.model_dump()
         assert dumped == {"x": 1, "y": "hello"}
 
+    # * list / nested object / enum support
+
+    def test_list_field(self):
+        schema_json = '{"tags": {"type": "list", "items": "str"}}'
+        model = build_model_from_schema_json(schema_json)
+        instance = model(tags=["a", "b"])
+        assert instance.tags == ["a", "b"]
+
+    def test_nested_object_field(self):
+        schema_json = (
+            '{"address": {"type": "object", "properties": {"street": "str", "city": "str"}}}'
+        )
+        model = build_model_from_schema_json(schema_json)
+        instance = model(address={"street": "123 Main", "city": "Seoul"})
+        assert instance.address.street == "123 Main"
+        assert instance.address.city == "Seoul"
+
+    def test_enum_field(self):
+        schema_json = '{"status": {"type": "enum", "values": ["active", "inactive"]}}'
+        model = build_model_from_schema_json(schema_json)
+        instance = model(status="active")
+        assert instance.status == "active"
+
+    def test_enum_invalid_value_raises(self):
+        schema_json = '{"status": {"type": "enum", "values": ["active", "inactive"]}}'
+        model = build_model_from_schema_json(schema_json)
+        with pytest.raises(Exception):
+            model(status="unknown")
+
+    def test_object_empty_properties_raises(self):
+        schema_json = '{"address": {"type": "object", "properties": {}}}'
+        with pytest.raises(ValueError, match="non-empty"):
+            build_model_from_schema_json(schema_json)
+
+    def test_enum_empty_values_raises(self):
+        schema_json = '{"status": {"type": "enum", "values": []}}'
+        with pytest.raises(ValueError, match="non-empty"):
+            build_model_from_schema_json(schema_json)
+
+    def test_list_unknown_items_type_raises(self):
+        schema_json = '{"tags": {"type": "list", "items": "unknown"}}'
+        with pytest.raises(ValueError, match="Unknown items type"):
+            build_model_from_schema_json(schema_json)
+
 
 # * _validate_source tests
 

@@ -15,7 +15,7 @@ class SheetResult(BaseModel, Generic[T]):
 
     sheet_name: str = Field(description="Name of the extracted sheet")
     success: bool = Field(description="Whether extraction succeeded")
-    records: list[T] = Field(default_factory=list, description="Extracted records")
+    records: list[T] = Field(default_factory=lambda: [], description="Extracted records")
     error: str | None = Field(default=None, description="Error message if extraction failed")
     usage: TokenUsage | None = Field(default=None, description="Token usage for this sheet")
 
@@ -56,7 +56,7 @@ class WorkbookResult(BaseModel):
     def __contains__(self, sheet_name: object) -> bool:
         return sheet_name in self.results
 
-    def __iter__(self) -> Iterator[str]:  # type: ignore[override]
+    def __iter__(self) -> Iterator[str]:  # type: ignore
         return iter(self.results)
 
     def __len__(self) -> int:

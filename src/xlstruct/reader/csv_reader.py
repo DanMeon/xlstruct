@@ -6,6 +6,7 @@ Dialect (delimiter, quoting) is auto-detected via ``csv.Sniffer``.
 """
 
 import csv
+import datetime
 import io
 import logging
 
@@ -33,7 +34,7 @@ class CsvReader:
         """
         sample = text[:_SNIFF_SAMPLE_BYTES]
         try:
-            dialect: csv.Dialect = csv.Sniffer().sniff(sample)  # type: ignore[assignment]
+            dialect: csv.Dialect = csv.Sniffer().sniff(sample)  # type: ignore
             return dialect
         except csv.Error:
             return None
@@ -57,7 +58,9 @@ class CsvReader:
         Returns:
             WorkbookData with a single SheetData entry named "Sheet1".
         """
-        text = file_bytes.decode(encoding)
+        # ^ utf-8-sig strips BOM if present; identical to utf-8 otherwise
+        effective_encoding = "utf-8-sig" if encoding == "utf-8" else encoding
+        text = file_bytes.decode(effective_encoding)
 
         # * Dialect auto-detection
         dialect = self._detect_dialect(text)
@@ -133,10 +136,28 @@ class CsvReader:
         return raw
 
     @staticmethod
+    def _is_iso_date(value: str) -> bool:
+        """Check if a string is a valid ISO date or datetime."""
+        if len(value) < 10:
+            return False
+        try:
+            datetime.datetime.fromisoformat(value)
+            return True
+        except ValueError:
+            pass
+        try:
+            datetime.date.fromisoformat(value)
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
     def _infer_type(value: str | int | float | bool) -> str:
         """Map parsed value to data_type code."""
         if isinstance(value, bool):
             return "b"
         if isinstance(value, (int, float)):
             return "n"
+        if CsvReader._is_iso_date(value):  # pyright: ignore[reportUnnecessaryIsInstance]
+            return "d"
         return "s"

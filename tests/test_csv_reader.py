@@ -125,3 +125,56 @@ def test_mixed_types_pipe() -> None:
     assert types[(2, 3)] == "n"
     assert values[(2, 4)] is True
     assert types[(2, 4)] == "b"
+
+
+# * BOM handling
+
+
+def test_bom_stripped_from_first_cell() -> None:
+    """UTF-8 BOM is stripped and does not appear in the first cell value."""
+    bom = b"\xef\xbb\xbf"
+    content = bom + b"name,value\nAlpha,1\n"
+    wb = reader.read(content)
+
+    values = {(c.row, c.col): c.value for c in wb.sheets[0].cells}
+    assert values[(1, 1)] == "name"
+    assert not str(values[(1, 1)]).startswith("\ufeff")
+
+
+# * Date/datetime parsing
+
+
+def test_date_parsing() -> None:
+    """ISO date string is detected as date type (stored as string)."""
+    content = "label,date_col\nfoo,2024-01-15\n"
+    wb = reader.read(content.encode())
+
+    values = {(c.row, c.col): c.value for c in wb.sheets[0].cells}
+    types = {(c.row, c.col): c.data_type for c in wb.sheets[0].cells}
+
+    assert values[(2, 2)] == "2024-01-15"
+    assert types[(2, 2)] == "d"
+
+
+def test_datetime_parsing() -> None:
+    """ISO datetime string is detected as date type (stored as string)."""
+    content = "label,ts_col\nfoo,2024-01-15T10:30:00\n"
+    wb = reader.read(content.encode())
+
+    values = {(c.row, c.col): c.value for c in wb.sheets[0].cells}
+    types = {(c.row, c.col): c.data_type for c in wb.sheets[0].cells}
+
+    assert values[(2, 2)] == "2024-01-15T10:30:00"
+    assert types[(2, 2)] == "d"
+
+
+def test_non_date_string_remains_string() -> None:
+    """Strings that look date-like but aren't remain as strings."""
+    content = "label,value\nfoo,2024-hello\n"
+    wb = reader.read(content.encode())
+
+    values = {(c.row, c.col): c.value for c in wb.sheets[0].cells}
+    types = {(c.row, c.col): c.data_type for c in wb.sheets[0].cells}
+
+    assert values[(2, 2)] == "2024-hello"
+    assert types[(2, 2)] == "s"

@@ -1,6 +1,7 @@
 """Tests for codegen subpackage: executor, validation, schema_utils."""
 
 import json
+import logging
 from unittest.mock import AsyncMock
 
 from pydantic import BaseModel
@@ -13,6 +14,7 @@ from xlstruct.codegen.executor import (
 )
 from xlstruct.codegen.schema_utils import get_schema_source
 from xlstruct.codegen.validation import ScriptValidator
+from xlstruct.schemas.codegen import ColumnMapping, MappingPlan
 
 # * Test schemas
 
@@ -193,6 +195,31 @@ class TestScanBlockedImports:
         result = scan_blocked_imports(code)
         assert any("__builtins__" in r for r in result)
 
+    # * getattr/setattr/delattr dunder bypass detection
+
+    def test_getattr_globals_detected(self):
+        code = "getattr(obj, '__globals__')"
+        result = scan_blocked_imports(code)
+        assert any("__globals__" in r for r in result)
+
+    def test_getattr_normal_attr_clean(self):
+        code = "getattr(obj, 'normal_attr')"
+        assert scan_blocked_imports(code) == []
+
+    def test_setattr_builtins_detected(self):
+        code = "setattr(obj, '__builtins__', val)"
+        result = scan_blocked_imports(code)
+        assert any("__builtins__" in r for r in result)
+
+    def test_delattr_subclasses_detected(self):
+        code = "delattr(cls, '__subclasses__')"
+        result = scan_blocked_imports(code)
+        assert any("__subclasses__" in r for r in result)
+
+    def test_getattr_non_dunder_string_clean(self):
+        code = "x = getattr(obj, 'sheet_name')\ny = setattr(obj, 'value', 42)"
+        assert scan_blocked_imports(code) == []
+
 
 # * _build_safe_env
 
@@ -339,16 +366,38 @@ class TestFilterByRequiredFields:
         assert len(result) == 1
         assert result[0]["name"] == "Alice"
 
-    def test_empty_string_required_field_filtered_out(self):
+    def test_empty_string_required_str_field_preserved(self):
+        # ^ empty string is a valid Pydantic V2 value for str fields
         data = [
             {"name": "Bob", "value": 10},
-            {"name": "", "value": 20},  # ^ empty string treated as null
+            {"name": "", "value": 20},
+        ]
+        stdout = json.dumps(data)
+        result_str = ScriptValidator._filter_by_required_fields(stdout, SampleRecord)
+        result = json.loads(result_str)
+        assert len(result) == 2
+
+    def test_none_required_field_filtered_out(self):
+        data = [
+            {"name": "Carol", "value": 30},
+            {"name": None, "value": 40},
         ]
         stdout = json.dumps(data)
         result_str = ScriptValidator._filter_by_required_fields(stdout, SampleRecord)
         result = json.loads(result_str)
         assert len(result) == 1
-        assert result[0]["name"] == "Bob"
+        assert result[0]["name"] == "Carol"
+
+    def test_all_required_present_including_empty_string(self):
+        # ^ all records have required fields populated (empty string counts as present)
+        data = [
+            {"name": "", "value": 0},
+            {"name": "X", "value": 1},
+        ]
+        stdout = json.dumps(data)
+        result_str = ScriptValidator._filter_by_required_fields(stdout, SampleRecord)
+        result = json.loads(result_str)
+        assert len(result) == 2
 
     def test_all_valid_records_preserved(self):
         data = [{"name": f"item_{i}", "value": i} for i in range(5)]
@@ -443,3 +492,140 @@ class TestScriptValidatorValidate:
         assert result.success is False
         assert result.timed_out is True
         assert result.exit_code == -1
+
+
+# * MappingPlan validation (orchestrator)
+
+
+def _make_mapping_plan(
+    column_mappings: list[ColumnMapping] | None = None,
+) -> MappingPlan:
+    """Helper to build a MappingPlan with sensible defaults."""
+    return MappingPlan(
+        header_structure="single row header",
+        data_start_row=2,
+        row_to_records="1:1",
+        row_classification="all rows are data rows",
+        column_mappings=column_mappings or [],
+        special_handling=[],
+    )
+
+
+def _make_column_mapping(schema_field: str) -> ColumnMapping:
+    return ColumnMapping(
+        schema_field=schema_field,
+        source_columns=["A"],
+        mapping_logic="direct copy",
+    )
+
+
+class TestMappingPlanValidation:
+    """Tests for MappingPlan validation between Phase 0 and Phase 1.
+
+    These test the validation logic inlined in CodegenOrchestrator.generate_script.
+    We extract the logic pattern and test it directly to avoid mocking the full pipeline.
+    """
+
+    def _validate_mapping_plan(self, mapping_plan: MappingPlan) -> MappingPlan:
+        """Replicate the validation logic from orchestrator.generate_script."""
+        _logger = logging.getLogger("xlstruct.codegen.orchestrator")
+
+        if not mapping_plan.column_mappings:
+            _logger.warning(
+                "Phase 0 returned empty column mappings — Phase 1 will infer mappings from raw data"
+            )
+
+        # ^ Check for duplicate schema_field entries
+        seen_fields: set[str] = set()
+        duplicates: list[str] = []
+        for cm in mapping_plan.column_mappings:
+            if cm.schema_field in seen_fields:
+                duplicates.append(cm.schema_field)
+            seen_fields.add(cm.schema_field)
+
+        if duplicates:
+            _logger.warning(
+                "Phase 0 produced duplicate field mappings: %s — keeping first occurrence",
+                duplicates,
+            )
+            unique_mappings: list[ColumnMapping] = []
+            seen: set[str] = set()
+            for cm in mapping_plan.column_mappings:
+                if cm.schema_field not in seen:
+                    unique_mappings.append(cm)
+                    seen.add(cm.schema_field)
+            mapping_plan = mapping_plan.model_copy(update={"column_mappings": unique_mappings})
+
+        return mapping_plan
+
+    def test_empty_column_mappings_warns_but_does_not_raise(self, caplog):
+        """Empty column_mappings should produce a warning, not an error."""
+        plan = _make_mapping_plan(column_mappings=[])
+        with caplog.at_level(logging.WARNING, logger="xlstruct.codegen.orchestrator"):
+            result = self._validate_mapping_plan(plan)
+        assert result.column_mappings == []
+        assert "empty column mappings" in caplog.text
+
+    def test_duplicate_schema_fields_deduplicated(self, caplog):
+        """Duplicate schema_field entries should be deduplicated, keeping first occurrence."""
+        cm_a = ColumnMapping(
+            schema_field="name",
+            source_columns=["A"],
+            mapping_logic="first occurrence",
+        )
+        cm_b = ColumnMapping(
+            schema_field="name",
+            source_columns=["B"],
+            mapping_logic="duplicate — should be removed",
+        )
+        cm_c = _make_column_mapping("value")
+
+        plan = _make_mapping_plan(column_mappings=[cm_a, cm_b, cm_c])
+        with caplog.at_level(logging.WARNING, logger="xlstruct.codegen.orchestrator"):
+            result = self._validate_mapping_plan(plan)
+
+        assert len(result.column_mappings) == 2
+        # ^ First occurrence of "name" kept
+        assert result.column_mappings[0].schema_field == "name"
+        assert result.column_mappings[0].mapping_logic == "first occurrence"
+        assert result.column_mappings[1].schema_field == "value"
+        assert "duplicate field mappings" in caplog.text
+
+    def test_valid_mappings_pass_through_unchanged(self, caplog):
+        """Valid, unique mappings should pass through without warnings."""
+        mappings = [
+            _make_column_mapping("name"),
+            _make_column_mapping("value"),
+            _make_column_mapping("note"),
+        ]
+        plan = _make_mapping_plan(column_mappings=mappings)
+        with caplog.at_level(logging.WARNING, logger="xlstruct.codegen.orchestrator"):
+            result = self._validate_mapping_plan(plan)
+
+        assert len(result.column_mappings) == 3
+        assert [cm.schema_field for cm in result.column_mappings] == [
+            "name",
+            "value",
+            "note",
+        ]
+        # ^ No warnings should be emitted
+        assert caplog.text == ""
+
+    def test_multiple_duplicates_all_deduplicated(self):
+        """Multiple different duplicate fields should all be deduplicated."""
+        mappings = [
+            _make_column_mapping("name"),
+            _make_column_mapping("value"),
+            _make_column_mapping("name"),
+            _make_column_mapping("value"),
+            _make_column_mapping("note"),
+        ]
+        plan = _make_mapping_plan(column_mappings=mappings)
+        result = self._validate_mapping_plan(plan)
+
+        assert len(result.column_mappings) == 3
+        assert [cm.schema_field for cm in result.column_mappings] == [
+            "name",
+            "value",
+            "note",
+        ]

@@ -56,8 +56,8 @@ class TestBuildConfidenceSchema:
                 "qty_confidence": "low",
             }
         )
-        assert instance.item_name_confidence == "very_high"  # type: ignore[attr-defined]
-        assert instance.qty_confidence == "low"  # type: ignore[attr-defined]
+        assert instance.item_name_confidence == "very_high"  # type: ignore
+        assert instance.qty_confidence == "low"  # type: ignore
 
     def test_rejects_invalid_confidence_level(self) -> None:
         """Confidence fields should reject values outside the Literal enum."""

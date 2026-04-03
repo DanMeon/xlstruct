@@ -162,3 +162,53 @@ class TestChunkSplitterSplit:
         splitter = ChunkSplitter()
         chunks = splitter.split(sheet, token_budget=500_000)
         assert len(chunks) > 1
+
+
+# * Custom threshold tests
+
+
+class TestCustomThresholds:
+    def test_needs_chunking_custom_row_threshold_triggers(self):
+        # ^ 60 data rows = row_count 61, above custom threshold of 50
+        sheet = _make_large_sheet(60)
+        assert needs_chunking(sheet, token_budget=100_000, row_threshold=50) is True
+
+    def test_needs_chunking_custom_row_threshold_no_trigger(self):
+        # ^ 60 data rows = row_count 61, below default threshold of 100
+        sheet = _make_large_sheet(60)
+        assert needs_chunking(sheet, token_budget=100_000) is False
+
+    def test_split_custom_min_chunk_rows_produces_smaller_chunks(self):
+        sheet = _make_large_sheet(250)
+        splitter = ChunkSplitter()
+        # ^ Default min_chunk_rows=10, row_threshold=100 produces chunks of 100 rows
+        default_chunks = splitter.split(sheet, token_budget=500_000)
+        # ^ Custom min_chunk_rows=5, row_threshold=50 produces chunks of 50 rows
+        custom_chunks = splitter.split(
+            sheet, token_budget=500_000, min_chunk_rows=5, row_threshold=50
+        )
+        assert len(custom_chunks) > len(default_chunks)
+
+    def test_split_custom_thresholds_preserves_all_data(self):
+        data_rows = 120
+        sheet = _make_large_sheet(data_rows)
+        splitter = ChunkSplitter()
+        chunks = splitter.split(sheet, token_budget=500_000, min_chunk_rows=5, row_threshold=30)
+
+        # ^ All data rows must be covered
+        seen_rows: set[int] = set()
+        for chunk in chunks:
+            for cell in chunk.cells:
+                if cell.row != 1:
+                    seen_rows.add(cell.row)
+
+        expected_rows = set(range(2, data_rows + 2))
+        assert seen_rows == expected_rows
+
+    def test_split_custom_thresholds_headers_in_every_chunk(self):
+        sheet = _make_large_sheet(120)
+        splitter = ChunkSplitter()
+        chunks = splitter.split(sheet, token_budget=500_000, min_chunk_rows=5, row_threshold=30)
+        for chunk in chunks:
+            header_cells = [c for c in chunk.cells if c.row == 1]
+            assert len(header_cells) > 0

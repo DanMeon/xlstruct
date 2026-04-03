@@ -2,6 +2,7 @@
 
 import json
 import logging
+from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -124,29 +125,28 @@ class ScriptValidator:
         stdout: str,
         schema: type[BaseModel],
     ) -> str:
-        """Filter out records where Pydantic-required fields are null or empty.
+        """Filter out records where Pydantic-required fields are null.
 
         Uses schema.model_fields to find fields without defaults,
-        then removes records where any of those fields is None or "".
+        then removes records where any of those fields is None.
         This is a deterministic post-processing step — no LLM involvement.
         """
         try:
-            data = json.loads(stdout.strip())
+            raw: Any = json.loads(stdout.strip())
         except (json.JSONDecodeError, TypeError):
             return stdout
 
-        if not isinstance(data, list) or not data:
+        if not isinstance(raw, list) or not raw:
             return stdout
+        data = cast(list[dict[str, Any]], raw)
 
         required = [name for name, field in schema.model_fields.items() if field.is_required()]
         if not required:
             return stdout
 
         original_count = len(data)
-        filtered = [
-            record
-            for record in data
-            if all(record.get(f) is not None and record.get(f) != "" for f in required)
+        filtered: list[dict[str, Any]] = [
+            record for record in data if all(record.get(f) is not None for f in required)
         ]
 
         if len(filtered) < original_count:
@@ -185,7 +185,7 @@ class ScriptValidator:
             return msg
 
         try:
-            data = json.loads(stdout_stripped)
+            raw: Any = json.loads(stdout_stripped)
         except json.JSONDecodeError as e:
             # ^ Truncate stdout preview to avoid prompt bloat
             preview = stdout_stripped[:500]
@@ -195,11 +195,12 @@ class ScriptValidator:
                 f"stdout preview:\n{preview}"
             )
 
-        if not isinstance(data, list):
+        if not isinstance(raw, list):
             return (
                 f"OUTPUT VALIDATION ERROR: Expected JSON array (list), "
-                f"got {type(data).__name__}. The script must output a JSON array of records."
+                f"got {type(raw).__name__}. The script must output a JSON array of records."
             )
+        data = cast(list[dict[str, Any]], raw)
 
         if len(data) == 0:
             msg = (

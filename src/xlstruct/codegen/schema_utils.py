@@ -27,7 +27,7 @@ def get_schema_source(schema_cls: type[BaseModel]) -> str:
             sources.append(source)
         except (OSError, TypeError):
             # ^ inspect.getsource() fails for dynamically created classes
-            schema_json = cls.model_json_schema()  # type: ignore[attr-defined]
+            schema_json = cls.model_json_schema()  # type: ignore
             sources.append(f"# Schema for {cls.__name__} (source unavailable):\n# {schema_json}\n")
 
     return "\n\n".join(sources)
@@ -54,7 +54,7 @@ def _collect_models(
     ordered.append(cls)
 
 
-def _extract_model_types(annotation: type) -> list[type[BaseModel]]:
+def _extract_model_types(annotation: type | object) -> list[type[BaseModel]]:
     """Extract BaseModel subclasses from a type annotation.
 
     Handles: SubModel, list[SubModel], dict[str, SubModel],
@@ -75,6 +75,6 @@ def _extract_model_types(annotation: type) -> list[type[BaseModel]]:
                 result.append(arg)
             elif get_origin(arg) is not None:
                 # ^ Nested generics
-                result.extend(_extract_model_types(arg))
+                result.extend(_extract_model_types(arg))  # type: ignore
 
     return result

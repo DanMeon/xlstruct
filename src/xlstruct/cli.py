@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 """XLStruct CLI — extract structured data from Excel files."""
 
 import csv

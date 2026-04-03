@@ -5,7 +5,7 @@ local, s3://, az://, gs://, etc.
 """
 
 import asyncio
-from typing import Any
+from typing import IO, Any, cast
 
 import fsspec
 
@@ -27,8 +27,8 @@ async def read_file(source: str, **storage_options: Any) -> bytes:
     """
 
     def _sync_read() -> bytes:
-        with fsspec.open(source, mode="rb", **storage_options) as f:
-            return bytes(f.read())
+        with fsspec.open(source, mode="rb", **storage_options) as f:  # type: ignore
+            return bytes(cast(IO[bytes], f).read())
 
     try:
         # ^ fsspec is sync-only for most backends; to_thread is safest async pattern

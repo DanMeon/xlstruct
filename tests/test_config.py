@@ -1,5 +1,8 @@
 """Tests for configuration."""
 
+import pytest
+from pydantic import ValidationError
+
 from xlstruct.config import ExtractorConfig, get_provider_kwargs
 
 
@@ -19,6 +22,36 @@ class TestExtractorConfig:
         )
         assert config.provider == "anthropic/claude-sonnet-4-5-20250514"
         assert config.max_retries == 5
+
+
+class TestExtractorConfigValidation:
+    def test_token_budget_zero_raises(self):
+        with pytest.raises(ValidationError):
+            ExtractorConfig(token_budget=0)
+
+    def test_token_budget_negative_raises(self):
+        with pytest.raises(ValidationError):
+            ExtractorConfig(token_budget=-1)
+
+    def test_max_retries_negative_raises(self):
+        with pytest.raises(ValidationError):
+            ExtractorConfig(max_retries=-1)
+
+    def test_temperature_too_high_raises(self):
+        with pytest.raises(ValidationError):
+            ExtractorConfig(temperature=3.0)
+
+    def test_codegen_timeout_zero_raises(self):
+        with pytest.raises(ValidationError):
+            ExtractorConfig(codegen_timeout=0)
+
+    def test_max_retries_zero_valid(self):
+        config = ExtractorConfig(max_retries=0)
+        assert config.max_retries == 0
+
+    def test_temperature_max_valid(self):
+        config = ExtractorConfig(temperature=2.0)
+        assert config.temperature == 2.0
 
 
 class TestGetProviderKwargs:

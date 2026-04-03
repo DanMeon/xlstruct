@@ -20,12 +20,12 @@ class ExtractionReport(BaseModel):
         description="Token consumption breakdown for this extraction.",
     )
     source_rows: list[list[int]] = Field(
-        default_factory=list,
+        default_factory=lambda: list[list[int]](),
         description="Per-record source row numbers from the original Excel file. "
         "Populated when track_provenance=True. Parallel to the result items list.",
     )
     source_cells: list[dict[str, str]] = Field(
-        default_factory=list,
+        default_factory=lambda: list[dict[str, str]](),
         description="Per-record cell address mapping (field_name -> cell address like 'A5'). "
         "Populated when track_provenance=True. Parallel to the result items list.",
     )

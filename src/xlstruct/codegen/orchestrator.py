@@ -9,7 +9,7 @@ Phases:
 import ast
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -31,7 +31,7 @@ from xlstruct.prompts.codegen import (
     build_error_feedback,
     build_header_detection_prompt,
 )
-from xlstruct.schemas.codegen import CodegenAttempt, GeneratedScript
+from xlstruct.schemas.codegen import CodegenAttempt, ColumnMapping, GeneratedScript
 from xlstruct.schemas.core import SheetData
 from xlstruct.schemas.usage import UsageTracker
 
@@ -125,6 +125,34 @@ class CodegenOrchestrator:
             len(mapping_plan.column_mappings),
             mapping_plan.row_to_records,
         )
+
+        # * Validate MappingPlan before Phase 1
+        if not mapping_plan.column_mappings:
+            logger.warning(
+                "Phase 0 returned empty column mappings — Phase 1 will infer mappings from raw data"
+            )
+
+        # ^ Check for duplicate schema_field entries
+        seen_fields: set[str] = set()
+        duplicates: list[str] = []
+        for cm in mapping_plan.column_mappings:
+            if cm.schema_field in seen_fields:
+                duplicates.append(cm.schema_field)
+            seen_fields.add(cm.schema_field)
+
+        if duplicates:
+            logger.warning(
+                "Phase 0 produced duplicate field mappings: %s — keeping first occurrence",
+                duplicates,
+            )
+            # ^ Deduplicate: keep first mapping for each schema_field
+            unique_mappings: list[ColumnMapping] = []
+            seen: set[str] = set()
+            for cm in mapping_plan.column_mappings:
+                if cm.schema_field not in seen:
+                    unique_mappings.append(cm)
+                    seen.add(cm.schema_field)
+            mapping_plan = mapping_plan.model_copy(update={"column_mappings": unique_mappings})
 
         # * Build Phase 1 prompt with mapping plan
         phase1_prompt = build_codegen_prompt(
@@ -330,27 +358,28 @@ class CodegenOrchestrator:
         on each validated model instance for provenance tracking.
         """
         try:
-            data = json.loads(stdout.strip())
+            raw: Any = json.loads(stdout.strip())
         except json.JSONDecodeError as e:
             raise ExtractionError(
                 f"Failed to parse script output as JSON: {e}",
                 code=ErrorCode.EXTRACTION_OUTPUT_PARSE_FAILED,
             ) from e
 
-        if not isinstance(data, list):
+        if not isinstance(raw, list):
             raise ExtractionError(
-                f"Expected JSON array from script, got {type(data).__name__}",
+                f"Expected JSON array from script, got {type(raw).__name__}",
                 code=ErrorCode.EXTRACTION_OUTPUT_PARSE_FAILED,
             )
+        data = cast(list[dict[str, Any]], raw)
 
-        results = []
+        results: list[BaseModel] = []
         for i, item in enumerate(data):
             # ^ Extract provenance before validation (not part of schema)
-            source_row = item.pop("_source_row", None) if isinstance(item, dict) else None
+            source_row = item.pop("_source_row", None)
             try:
                 record = schema.model_validate(item)
                 if source_row is not None:
-                    record._source_rows = [source_row]  # type: ignore[attr-defined]
+                    object.__setattr__(record, "_source_rows", [source_row])
                 results.append(record)
             except ValidationError as e:
                 logger.warning("Record %d failed validation, skipping: %s", i, e)

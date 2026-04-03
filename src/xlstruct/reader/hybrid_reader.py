@@ -31,19 +31,29 @@ class _CalamineSheetData:
     dimensions: str = ""
     row_count: int = 0
     col_count: int = 0
-    merged_ranges: list[str] = field(default_factory=list)
+    merged_ranges: list[str] = field(default_factory=lambda: list[str]())
     # ^ {(1-indexed row, col): range_str}
-    merged_cell_map: dict[tuple[int, int], str] = field(default_factory=dict)
+    merged_cell_map: dict[tuple[int, int], str] = field(
+        default_factory=lambda: dict[tuple[int, int], str]()
+    )
     # ^ {(1-indexed row, col): (1-indexed origin row, col)}
-    merge_origins: dict[tuple[int, int], tuple[int, int]] = field(default_factory=dict)
+    merge_origins: dict[tuple[int, int], tuple[int, int]] = field(
+        default_factory=lambda: dict[tuple[int, int], tuple[int, int]]()
+    )
     # ^ {(1-indexed row, col): calamine value}
-    values: dict[tuple[int, int], Any] = field(default_factory=dict)
+    values: dict[tuple[int, int], Any] = field(default_factory=lambda: dict[tuple[int, int], Any]())
     # ^ {(1-indexed row, col): "s"|"n"|"d"|"b"}
-    data_types: dict[tuple[int, int], str] = field(default_factory=dict)
+    data_types: dict[tuple[int, int], str] = field(
+        default_factory=lambda: dict[tuple[int, int], str]()
+    )
     # ^ {(1-indexed row, col): formula_string} — populated by openpyxl pass
-    formulas: dict[tuple[int, int], str] = field(default_factory=dict)
+    formulas: dict[tuple[int, int], str] = field(
+        default_factory=lambda: dict[tuple[int, int], str]()
+    )
     # ^ {(1-indexed row, col): number_format_string} — populated by openpyxl pass
-    number_formats: dict[tuple[int, int], str] = field(default_factory=dict)
+    number_formats: dict[tuple[int, int], str] = field(
+        default_factory=lambda: dict[tuple[int, int], str]()
+    )
 
     # ^ Formats where openpyxl can extract formula strings (Pass 2)
 
@@ -176,16 +186,16 @@ class HybridReader:
                 for c_idx, value in enumerate(row):
                     key = (r_idx + 1, c_idx + 1)
 
-                    # ^ Skip empty cells (calamine returns '' for empty)
-                    if value == "" or value is None:
+                    # ^ Skip empty cells (calamine returns '' for empty, None for missing)
+                    if value == "" or value is None:  # pyright: ignore[reportUnnecessaryComparison]
                         continue
 
                     cal.data_types[key] = self._infer_data_type(value)
                     # ^ Convert date/datetime to ISO string for CellData compatibility
-                    if isinstance(value, (datetime, date, time, timedelta)):
-                        cal.values[key] = (
-                            value.isoformat() if hasattr(value, "isoformat") else str(value)
-                        )
+                    if isinstance(value, (datetime, date, time)):
+                        cal.values[key] = value.isoformat()
+                    elif isinstance(value, timedelta):
+                        cal.values[key] = str(value)
                     else:
                         cal.values[key] = value
 

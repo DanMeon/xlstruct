@@ -76,26 +76,15 @@ line-length = 100
 select = ["E", "F", "I", "UP"]
 ignore = ["E501"]
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-show_error_codes = true
-
-[[tool.mypy.overrides]]
-module = ["openpyxl.*", "fsspec.*", "calamine.*", "anthropic.*", "instructor.*", "tiktoken.*", "aiodocker.*", "formulas.*", "numpy.*", "mcp.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "xlstruct.mcp_server"
-disallow_untyped_decorators = false
-
-[[tool.mypy.overrides]]
-module = "xlstruct.codegen.backends.docker"
-disallow_untyped_calls = false
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+reportMissingImports = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUntypedFunctionDecorator = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -106,7 +95,7 @@ dev = [
     "adlfs>=2026.2.0",
     "azure-storage-blob>=12.28.0",
     "gcsfs>=2026.2.0",
-    "mypy>=1.19.1",
+    "pyright>=1.1.400",
     "pandas>=3.0.1",
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",

@@ -50,7 +50,7 @@ class TokenUsage(BaseModel):
         default=0, description="Tokens read from prompt cache (Anthropic + OpenAI)"
     )
     breakdown: list[tuple[str, int, int]] = Field(
-        default_factory=list,
+        default_factory=lambda: list[tuple[str, int, int]](),
         description="Per-call breakdown: (label, input_tokens, output_tokens)",
     )
 

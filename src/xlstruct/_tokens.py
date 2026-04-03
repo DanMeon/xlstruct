@@ -12,14 +12,19 @@ if TYPE_CHECKING:
     from xlstruct.schemas.core import SheetData
 
 # * Module-level singleton
-_ENCODING: tiktoken.Encoding | None = None
+_encoding: tiktoken.Encoding | None = None
 
 
 def _get_encoding() -> tiktoken.Encoding:
-    global _ENCODING
-    if _ENCODING is None:
-        _ENCODING = tiktoken.get_encoding("cl100k_base")
-    return _ENCODING
+    global _encoding
+    if _encoding is None:
+        _encoding = tiktoken.get_encoding("cl100k_base")
+    return _encoding
+
+
+def count_tokens(text: str) -> int:
+    """Count tokens in a text string."""
+    return len(_get_encoding().encode(text))
 
 
 def estimate_sheet_tokens(sheet: "SheetData") -> int:

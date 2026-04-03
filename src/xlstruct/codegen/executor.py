@@ -10,12 +10,15 @@ Re-exports are provided for backward compatibility.
 import ast
 
 # * Re-exports for backward compatibility
-from xlstruct.codegen.backends.base import ExecutionBackend  # noqa: F401
-from xlstruct.codegen.backends.docker import DockerBackend, DockerConfig  # noqa: F401
-from xlstruct.codegen.backends.subprocess import (  # noqa: F401
-    ALLOWED_ENV_KEYS,
-    SubprocessBackend,  # noqa: F401
-    _build_safe_env,
+from xlstruct.codegen.backends.base import ExecutionBackend as ExecutionBackend  # noqa: F401
+from xlstruct.codegen.backends.docker import DockerBackend as DockerBackend  # noqa: F401
+from xlstruct.codegen.backends.docker import DockerConfig as DockerConfig  # noqa: F401
+from xlstruct.codegen.backends.subprocess import ALLOWED_ENV_KEYS as ALLOWED_ENV_KEYS  # noqa: F401
+from xlstruct.codegen.backends.subprocess import (
+    SubprocessBackend as SubprocessBackend,  # noqa: F401
+)
+from xlstruct.codegen.backends.subprocess import (
+    _build_safe_env as _build_safe_env,  # noqa: F401  # pyright: ignore[reportPrivateUsage]
 )
 
 # * Security constants
@@ -93,6 +96,9 @@ BLOCKED_ATTR_PATTERNS = frozenset(
     }
 )
 
+# ^ Builtin functions that can access blocked dunder attrs via string argument
+_ATTR_ACCESS_BUILTINS = frozenset({"getattr", "setattr", "delattr"})
+
 
 # * Security scanning
 
@@ -137,6 +143,12 @@ def scan_blocked_imports(code: str) -> list[str]:
             func_name = _get_call_name(node)
             if func_name in BLOCKED_BUILTINS:
                 violations.append(f"blocked builtin call: {func_name}")
+            # ^ Detect getattr/setattr/delattr with blocked dunder string args
+            if func_name in _ATTR_ACCESS_BUILTINS and len(node.args) >= 2:
+                arg = node.args[1]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    if arg.value in BLOCKED_DUNDER_ATTRS:
+                        violations.append(f"blocked dunder via {func_name}(): {arg.value}")
 
         # * Check dangerous attribute access
         elif isinstance(node, ast.Attribute):

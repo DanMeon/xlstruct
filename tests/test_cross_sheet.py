@@ -8,6 +8,7 @@ import openpyxl
 import pytest
 from pydantic import BaseModel
 
+from xlstruct.exceptions import ExtractionError
 from xlstruct.extractor import Extractor
 
 # * Test schema
@@ -250,3 +251,43 @@ class TestExtractCrossSheetSync:
         assert len(result) == 1
         assert result[0].region == "North"
         assert hasattr(result, "report")
+
+
+# * Token budget validation
+
+
+class TestCrossSheetTokenBudget:
+    async def test_exceeds_token_budget_raises_error(self, quarterly_xlsx):
+        """Combined encoding exceeding token_budget raises ExtractionError."""
+        extractor = Extractor(token_budget=1)
+
+        with pytest.raises(ExtractionError, match="exceeds token budget"):
+            await extractor.extract_cross_sheet(
+                quarterly_xlsx,
+                schema=QuarterlyRevenue,
+                sheets=["Q1", "Q2"],
+            )
+
+    async def test_within_token_budget_proceeds(self, quarterly_xlsx):
+        """Combined encoding within token_budget proceeds to extraction."""
+        extractor = Extractor(token_budget=1_000_000)
+
+        mock_results = [
+            QuarterlyRevenue(region="North", quarter="Q1", revenue=1000.0),
+        ]
+
+        async def mock_extract(encoded: str, schema: Any, instructions: Any, **kw: Any) -> list:
+            return mock_results
+
+        with patch(
+            "xlstruct.extraction.engine.ExtractionEngine.extract",
+            side_effect=mock_extract,
+        ):
+            result = await extractor.extract_cross_sheet(
+                quarterly_xlsx,
+                schema=QuarterlyRevenue,
+                sheets=["Q1", "Q2"],
+            )
+
+        assert len(result) == 1
+        assert result[0].region == "North"

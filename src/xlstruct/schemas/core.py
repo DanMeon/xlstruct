@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, PrivateAttr
 
 
 class CellData(BaseModel):
@@ -32,8 +32,8 @@ class SheetData(BaseModel):
 
     name: str
     dimensions: str = ""
-    cells: list[CellData] = Field(default_factory=list)
-    merged_ranges: list[str] = Field(default_factory=list)
+    cells: list[CellData] = []
+    merged_ranges: list[str] = []
     row_count: int = 0
     col_count: int = 0
 
@@ -65,7 +65,7 @@ class SheetData(BaseModel):
 class WorkbookData(BaseModel):
     """Full workbook data."""
 
-    sheets: list[SheetData] = Field(default_factory=list)
+    sheets: list[SheetData] = []
     file_name: str = ""
     file_size: int | None = None
 

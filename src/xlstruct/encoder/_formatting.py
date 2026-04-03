@@ -30,7 +30,7 @@ def format_cell_value(cell: CellData) -> str:
         # ^ Remove trailing zeros: 250.00 → "250", 42.5 → "42.5"
         if not math.isfinite(val):
             return str(val)
-        if val == int(val):
+        if val == int(val):  # pyright: ignore[reportUnnecessaryComparison]
             return str(int(val))
         return str(val)
     if isinstance(val, (datetime, date)):
@@ -143,7 +143,11 @@ def build_multi_row_headers(
     # * Build merge lookup: (row, col) → (origin_row, origin_col)
     merge_lookup: dict[tuple[int, int], tuple[int, int]] = {}
     for range_str in sheet.merged_ranges:
-        min_col, min_row, max_col, max_row = range_boundaries(range_str)
+        bounds = range_boundaries(range_str)
+        # ^ range_boundaries returns Optional ints, but merge ranges always have all four
+        assert bounds[0] is not None and bounds[1] is not None
+        assert bounds[2] is not None and bounds[3] is not None
+        min_col, min_row, max_col, max_row = bounds
         for r in range(min_row, max_row + 1):
             for c in range(min_col, max_col + 1):
                 if (r, c) != (min_row, min_col):
@@ -409,8 +413,6 @@ def summarize_column_types(
             t = "float"
         elif isinstance(val, (datetime, date)):
             t = "date"
-        elif isinstance(val, str):
-            t = "str"
         else:
             t = "str"
 
