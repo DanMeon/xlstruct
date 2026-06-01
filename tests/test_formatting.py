@@ -3,7 +3,7 @@
 from xlstruct.encoder._formatting import (
     build_column_headers,
     detect_header_row,
-    find_empty_rows,
+    find_non_empty_rows,
     format_cell_value,
     format_merged_regions,
     summarize_column_types,
@@ -75,11 +75,22 @@ class TestFormatMergedRegions:
         assert "Invoice #2024-001" in regions[0]
 
 
-class TestFindEmptyRows:
-    def test_no_empty_rows(self, simple_sheet: SheetData):
-        empty = find_empty_rows(simple_sheet)
+class TestFindNonEmptyRows:
+    def test_all_rows_non_empty(self, simple_sheet: SheetData):
+        non_empty = find_non_empty_rows(simple_sheet)
         # ^ All rows 1-6 have data
-        assert len(empty) == 0
+        assert non_empty == {1, 2, 3, 4, 5, 6}
+
+    def test_skips_empty_rows(self):
+        # ^ Rows 1 and 3 hold data; row 2 is a gap that must be excluded
+        cells = [
+            CellData(row=1, col=1, value="a"),
+            CellData(row=3, col=1, value="b"),
+        ]
+        sheet = SheetData(name="gap", row_count=3, col_count=1, cells=cells)
+        non_empty = find_non_empty_rows(sheet)
+        assert non_empty == {1, 3}
+        assert 2 not in non_empty
 
 
 class TestSummarizeColumnTypes:

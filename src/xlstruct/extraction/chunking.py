@@ -1,6 +1,6 @@
 """ChunkSplitter: Splits large sheets into processable chunks."""
 
-from xlstruct._tokens import estimate_sheet_tokens
+from xlstruct._tokens import estimate_row_token_costs, estimate_sheet_tokens
 from xlstruct.schemas.core import CellData, SheetData
 
 # ^ Minimum rows per chunk to avoid degenerate cases
@@ -67,22 +67,30 @@ class ChunkSplitter:
         if not sorted_row_nums:
             return [sheet]
 
-        # ^ Calculate rows per chunk from both token budget and row threshold
-        data_row_count = len(sorted_row_nums)
-        total_tokens = estimate_sheet_tokens(sheet)
+        # ^ Size chunks by each data row's real token cost (greedy bin-packing),
+        # ^ reserving the header cost that every chunk re-includes. This replaces
+        # ^ "sampled total / budget assuming uniform rows": chunks are packed to
+        # ^ the actual per-row weight, so a chunk fits (token_budget - header)
+        # ^ regardless of where the heavy rows sit. The row_threshold accuracy cap
+        # ^ still bounds each chunk's row count.
+        all_costs = estimate_row_token_costs(
+            [header_cells, *(data_rows[rn] for rn in sorted_row_nums)]
+        )
+        header_cost = all_costs[0]
+        row_costs = all_costs[1:]
+        data_budget = max(1, token_budget - header_cost)
 
-        if total_tokens > token_budget:
-            # ^ Token-based: split proportionally
-            chunk_count = max(1, total_tokens // token_budget)
-            rows_per_chunk = max(min_chunk_rows, data_row_count // chunk_count)
-        else:
-            # ^ Row-based: cap at threshold
-            rows_per_chunk = max(min_chunk_rows, row_threshold)
+        row_groups = self._pack_rows(
+            sorted_row_nums,
+            row_costs,
+            data_budget=data_budget,
+            min_chunk_rows=min_chunk_rows,
+            row_threshold=row_threshold,
+        )
 
         # * Build chunks
         chunks: list[SheetData] = []
-        for i in range(0, len(sorted_row_nums), rows_per_chunk):
-            chunk_row_nums = sorted_row_nums[i : i + rows_per_chunk]
+        for chunk_row_nums in row_groups:
             chunk_cells = list(header_cells)  # ^ Copy header cells into each chunk
             for rn in chunk_row_nums:
                 chunk_cells.extend(data_rows[rn])
@@ -102,3 +110,40 @@ class ChunkSplitter:
             )
 
         return chunks
+
+    @staticmethod
+    def _pack_rows(
+        row_nums: list[int],
+        row_costs: list[int],
+        *,
+        data_budget: int,
+        min_chunk_rows: int,
+        row_threshold: int,
+    ) -> list[list[int]]:
+        """Greedily group rows into chunks that fit data_budget tokens.
+
+        A chunk closes when it reaches row_threshold rows (the accuracy cap, a
+        hard upper bound that takes precedence over min_chunk_rows) or when
+        adding the next row would exceed data_budget — but the budget close only
+        applies once the chunk already holds min_chunk_rows, so tiny chunks are
+        avoided. Two degenerate cases can still exceed the budget, both
+        unavoidable: a single row heavier than data_budget (a row cannot be
+        split), and the first min_chunk_rows rows when they are collectively
+        heavier than data_budget (they are appended before the budget gate
+        activates).
+        """
+        groups: list[list[int]] = []
+        current: list[int] = []
+        current_cost = 0
+        for row_num, cost in zip(row_nums, row_costs):
+            over_budget = current_cost + cost > data_budget and len(current) >= min_chunk_rows
+            at_row_cap = len(current) >= row_threshold
+            if current and (over_budget or at_row_cap):
+                groups.append(current)
+                current = []
+                current_cost = 0
+            current.append(row_num)
+            current_cost += cost
+        if current:
+            groups.append(current)
+        return groups

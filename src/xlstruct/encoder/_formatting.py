@@ -344,14 +344,18 @@ def _generalize_formula(formula: str, row: int) -> str:
 # * Empty row/column detection
 
 
-def find_empty_rows(sheet: SheetData) -> set[int]:
-    """Find row numbers that are completely empty."""
+def find_non_empty_rows(sheet: SheetData) -> set[int]:
+    """Return row numbers that contain at least one non-empty cell.
+
+    Callers invert the membership test to skip empty rows; returning the
+    non-empty set avoids materializing a set over the full row range
+    (1..row_count), which is wasteful for tall sheets.
+    """
     non_empty_rows: set[int] = set()
     for cell in sheet.cells:
         if cell.display_value is not None:
             non_empty_rows.add(cell.row)
-    all_rows = set(range(1, sheet.row_count + 1))
-    return all_rows - non_empty_rows
+    return non_empty_rows
 
 
 # * Column type summary

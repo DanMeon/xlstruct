@@ -1,6 +1,12 @@
 """Tests for extraction/chunking.py: needs_chunking() and ChunkSplitter."""
 
-from xlstruct.extraction.chunking import ChunkSplitter, needs_chunking
+from xlstruct._tokens import estimate_row_token_costs, estimate_sheet_tokens
+from xlstruct.extraction.chunking import (
+    _CHUNKING_ROW_THRESHOLD,
+    _MIN_CHUNK_ROWS,
+    ChunkSplitter,
+    needs_chunking,
+)
 from xlstruct.schemas.core import CellData, SheetData
 
 # * Fixtures
@@ -212,3 +218,167 @@ class TestCustomThresholds:
         for chunk in chunks:
             header_cells = [c for c in chunk.cells if c.row == 1]
             assert len(header_cells) > 0
+
+
+# * Token-based chunking (header-aware budgeting)
+
+
+def _make_uniform_sheet(cols: int, data_rows: int) -> SheetData:
+    """Header + data rows where every data cell is a constant-width value.
+
+    Flat per-row density makes the chunk count predictable, so this fixture is
+    used to check that the row_threshold accuracy cap still bounds chunk size
+    even when the token budget is loose.
+    """
+    cells = [CellData(row=1, col=c, value=f"Col{c}", data_type="s") for c in range(1, cols + 1)]
+    for r in range(2, data_rows + 2):
+        for c in range(1, cols + 1):
+            cells.append(CellData(row=r, col=c, value="val", data_type="s"))
+    return SheetData(
+        name="Uniform",
+        dimensions=f"A1:Z{data_rows + 1}",
+        cells=cells,
+        merged_ranges=[],
+        row_count=data_rows + 1,
+        col_count=cols,
+    )
+
+
+def _make_header_heavy_sheet(cols: int, data_rows: int) -> SheetData:
+    """Long-label header row over compact numeric data — the header is a large
+    fraction of a small token budget, so reserving it per chunk matters."""
+    label = "Very Long Descriptive Column Header Label Number {c} With Extra Words"
+    cells = [
+        CellData(row=1, col=c, value=label.format(c=c), data_type="s") for c in range(1, cols + 1)
+    ]
+    for r in range(2, data_rows + 2):
+        for c in range(1, cols + 1):
+            cells.append(CellData(row=r, col=c, value=(r * c) % 9, data_type="n"))
+    return SheetData(
+        name="HeaderHeavy",
+        dimensions=f"A1:Z{data_rows + 1}",
+        cells=cells,
+        merged_ranges=[],
+        row_count=data_rows + 1,
+        col_count=cols,
+    )
+
+
+def _make_heavy_tail_sheet(cols: int, light_rows: int, heavy_rows: int) -> SheetData:
+    """Light rows followed by much heavier rows.
+
+    A proportional (equal-row-count) split groups the heavy tail into one
+    over-budget chunk; greedy packing by real per-row cost keeps every chunk
+    within budget. This is the case the old sampled-total formula got wrong.
+    """
+    heavy = "lorem ipsum dolor sit amet consectetur adipiscing elit sed"
+    cells = [CellData(row=1, col=c, value=f"Col{c}", data_type="s") for c in range(1, cols + 1)]
+    row = 2
+    for _ in range(light_rows):
+        for c in range(1, cols + 1):
+            cells.append(CellData(row=row, col=c, value="x", data_type="s"))
+        row += 1
+    for _ in range(heavy_rows):
+        for c in range(1, cols + 1):
+            cells.append(CellData(row=row, col=c, value=heavy, data_type="s"))
+        row += 1
+    return SheetData(
+        name="HeavyTail",
+        dimensions=f"A1:Z{row - 1}",
+        cells=cells,
+        merged_ranges=[],
+        row_count=row - 1,
+        col_count=cols,
+    )
+
+
+def _exact_chunk_cost(chunk: SheetData, header_row_count: int = 1) -> int:
+    """The splitter's own cost model for a chunk: header cost + sum of row costs."""
+    header_cells = [c for c in chunk.cells if c.row <= header_row_count]
+    rows: dict[int, list[CellData]] = {}
+    for c in chunk.cells:
+        if c.row > header_row_count:
+            rows.setdefault(c.row, []).append(c)
+    groups = [header_cells, *(rows[r] for r in sorted(rows))]
+    return sum(estimate_row_token_costs(groups))
+
+
+def _naive_proportional_max_cost(sheet: SheetData, budget: int, header_row_count: int = 1) -> int:
+    """Worst chunk cost under the pre-fix proportional split (equal row counts,
+    sampled total, no header reservation). Shows the old approach overflowed."""
+    header_cells = [c for c in sheet.cells if c.row <= header_row_count]
+    data_rows: dict[int, list[CellData]] = {}
+    for c in sheet.cells:
+        if c.row > header_row_count:
+            data_rows.setdefault(c.row, []).append(c)
+    srn = sorted(data_rows)
+    total = estimate_sheet_tokens(sheet)
+    if total > budget:
+        chunk_count = max(1, total // budget)
+        rows_per_chunk = max(_MIN_CHUNK_ROWS, len(srn) // chunk_count)
+    else:
+        rows_per_chunk = max(_MIN_CHUNK_ROWS, _CHUNKING_ROW_THRESHOLD)
+    header_cost = estimate_row_token_costs([header_cells])[0]
+    worst = 0
+    for i in range(0, len(srn), rows_per_chunk):
+        group = srn[i : i + rows_per_chunk]
+        cost = header_cost + sum(estimate_row_token_costs([data_rows[r] for r in group]))
+        worst = max(worst, cost)
+    return worst
+
+
+class TestTokenBasedChunking:
+    """The token-based path sizes chunks by each row's real token cost (greedy
+    bin-packing, header reserved) so every chunk fits token_budget regardless of
+    where the heavy rows sit — the case the old proportional split got wrong."""
+
+    def test_header_aware_chunks_fit_budget(self):
+        sheet = _make_header_heavy_sheet(cols=20, data_rows=200)
+        budget = 2_000
+        assert estimate_sheet_tokens(sheet) > budget  # ^ token path is exercised
+
+        chunks = ChunkSplitter().split(sheet, token_budget=budget)
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert _exact_chunk_cost(chunk) <= budget, f"{chunk.name} exceeds budget"
+        # ^ The pre-fix proportional split (no header reservation) overflowed here
+        assert _naive_proportional_max_cost(sheet, budget) > budget
+
+    def test_variable_row_sizes_each_chunk_fits(self):
+        # ^ Heavy rows concentrated in the tail: a proportional split overflows
+        # ^ the tail chunk; greedy packing by real cost keeps every chunk in budget.
+        sheet = _make_heavy_tail_sheet(cols=8, light_rows=300, heavy_rows=100)
+        budget = 2_000
+
+        chunks = ChunkSplitter().split(sheet, token_budget=budget)
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert _exact_chunk_cost(chunk) <= budget, f"{chunk.name} exceeds budget"
+        # ^ Prove the fix matters: the old proportional split overflows here
+        assert _naive_proportional_max_cost(sheet, budget) > budget
+
+    def test_row_threshold_caps_chunk_row_count(self):
+        # ^ Even with a loose budget, the accuracy cap bounds each chunk's rows
+        sheet = _make_uniform_sheet(cols=10, data_rows=500)
+        chunks = ChunkSplitter().split(sheet, token_budget=3_000)
+        assert len(chunks) > 1
+        for chunk in chunks:
+            data_row_nums = {c.row for c in chunk.cells if c.row != 1}
+            assert len(data_row_nums) <= _CHUNKING_ROW_THRESHOLD
+
+    def test_token_branch_covers_all_data_rows(self):
+        # ^ No data loss: every data row appears in exactly one chunk
+        sheet = _make_heavy_tail_sheet(cols=8, light_rows=300, heavy_rows=100)
+        chunks = ChunkSplitter().split(sheet, token_budget=2_000)
+        all_rows: list[int] = []
+        for chunk in chunks:
+            rows = {c.row for c in chunk.cells if c.row != 1}
+            all_rows.extend(rows)
+        # ^ rows 2..401 each appear exactly once (sorted equality rules out dupes)
+        assert sorted(all_rows) == list(range(2, 402))
+
+    def test_header_in_every_chunk_token_branch(self):
+        sheet = _make_heavy_tail_sheet(cols=8, light_rows=300, heavy_rows=100)
+        chunks = ChunkSplitter().split(sheet, token_budget=2_000)
+        for chunk in chunks:
+            assert any(c.row == 1 for c in chunk.cells), f"{chunk.name} missing header"
