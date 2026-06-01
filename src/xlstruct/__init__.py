@@ -2,6 +2,7 @@
 
 from xlstruct.config import ExtractionConfig, ExtractionMode, ExtractorConfig
 from xlstruct.exceptions import (
+    CodegenSecurityError,
     CodegenValidationError,
     ErrorCode,
     ExtractionError,
@@ -30,4 +31,5 @@ __all__ = [
     "ReaderError",
     "ExtractionError",
     "CodegenValidationError",
+    "CodegenSecurityError",
 ]

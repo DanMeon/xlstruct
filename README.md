@@ -34,7 +34,7 @@ Excel File + Pydantic Schema  →  LLM  →  Validated Structured Data
 - **Fast hybrid reader** — calamine (Rust) for speed + openpyxl for formula extraction. Both passes in one call.
 - **Token-aware encoding** — Compressed markdown encoding with head+tail sampling. Auto-chunks large sheets to fit within token budget.
 - **Prompt caching** — Anthropic cache_control markers applied automatically; OpenAI cached_tokens tracked
-- **Sandboxed execution** — Generated scripts run in a subprocess with blocked imports (network, subprocess) and stripped credentials. Optional Docker backend for OS-level isolation.
+- **Sandboxed execution** — Untrusted, generated scripts run in an OS-level Docker sandbox by default (non-root, no network, dropped capabilities, read-only rootfs). Without Docker, codegen fails closed; the non-isolating subprocess backend is an explicit trusted/dev-only opt-in.
 - **Multi-provider LLM** — OpenAI, Anthropic, Gemini via [Instructor](https://github.com/jxnl/instructor)
 - **Cloud storage** — Read from S3, Azure Blob, GCS via fsspec
 - **Async-first** — Async API with sync convenience wrappers. Jupyter-compatible via nest_asyncio.
@@ -289,7 +289,7 @@ config = ExtractionConfig(
 
 1. **Header Detection** — Auto-detect header rows via lightweight LLM call
 2. **Phase 0 (Analyzer)** — LLM analyzes spreadsheet structure → `MappingPlan`
-3. **Phase 1 (Parser Agent)** — LLM generates openpyxl-based parsing script → validated via subprocess
+3. **Phase 1 (Parser Agent)** — LLM generates openpyxl-based parsing script → validated by executing it in the sandbox (Docker by default)
 
 Each phase includes self-correction — errors are fed back to the LLM (up to `max_codegen_retries`).
 
@@ -408,9 +408,18 @@ config = ExtractorConfig(
 extractor = Extractor(config=config)
 ```
 
-### Docker Backend
+### Codegen Execution Sandbox
 
-For OS-level sandboxing, pass a `DockerBackend` via `execution_backend`:
+Codegen executes untrusted, LLM-generated Python. The execution backend is chosen by
+`ExtractorConfig.codegen_sandbox`:
+
+| `codegen_sandbox` | Behavior |
+|-------------------|----------|
+| `"auto"` (default) | Use Docker when `xlstruct[docker]` is installed; otherwise **fail closed** with `CodegenSecurityError` |
+| `"docker"` | Always use Docker (errors at run time if the daemon/package is missing) |
+| `"subprocess"` | Use the non-isolating subprocess backend — **NOT a security boundary; trusted/dev only** |
+
+An explicit `execution_backend` always overrides `codegen_sandbox`.
 
 ```bash
 pip install "xlstruct[docker]"
@@ -420,11 +429,26 @@ pip install "xlstruct[docker]"
 from xlstruct import Extractor
 from xlstruct.codegen.backends.docker import DockerBackend, DockerConfig
 
+# Customize the Docker sandbox (gVisor runtime, custom seccomp, image, limits)
 extractor = Extractor(
     execution_backend=DockerBackend(
-        config=DockerConfig(image="python:3.12-slim", mem_limit="1g"),
+        config=DockerConfig(image="python:3.12-slim", mem_limit="1g", runtime="runsc"),
     ),
 )
+```
+
+If you cannot run Docker and accept the risk in a trusted environment, opt into the
+subprocess backend explicitly:
+
+```python
+from xlstruct import Extractor, ExtractorConfig
+
+# Either via config…
+extractor = Extractor(config=ExtractorConfig(codegen_sandbox="subprocess"))
+
+# …or by injecting the backend directly (acknowledging it is not a boundary)
+from xlstruct.codegen.backends.subprocess import SubprocessBackend
+extractor = Extractor(execution_backend=SubprocessBackend(trusted=True))
 ```
 
 ## Architecture
@@ -464,8 +488,9 @@ src/xlstruct/
 │   ├── schema_utils.py   # Pydantic schema → source code utilities
 │   └── backends/
 │       ├── base.py       # ExecutionBackend protocol
-│       ├── subprocess.py # SubprocessBackend (default sandbox)
-│       └── docker.py     # DockerBackend (OS-level isolation)
+│       ├── resolver.py   # Backend resolution (sandbox-by-default, fail-closed)
+│       ├── subprocess.py # SubprocessBackend (trusted/dev-only — NOT a boundary)
+│       └── docker.py     # DockerBackend (OS-level isolation — default sandbox)
 ├── schemas/
 │   ├── core.py           # SheetData, WorkbookData, CellData
 │   ├── codegen.py        # GeneratedScript, MappingPlan, CodegenAttempt
@@ -497,11 +522,26 @@ src/xlstruct/
 
 ### Sandboxed Execution
 
-Generated scripts run in `SubprocessBackend` (or optionally `DockerBackend`) with security layers:
-- **Allowlist imports** — only safe modules (openpyxl, pydantic, stdlib math/data) permitted via AST scanning
-- **Blocked builtins** — `exec`, `eval`, `__import__`, `open`, etc. rejected before execution
-- **Stripped credentials** — API keys and cloud credentials removed from subprocess environment
-- **Timeout** — enforced via `codegen_timeout` config
+Codegen runs untrusted, LLM-generated Python, so the real boundary is an OS-level
+sandbox. By default (`codegen_sandbox="auto"`) scripts run in **`DockerBackend`** when
+`xlstruct[docker]` is installed; otherwise codegen **fails closed**.
+
+**`DockerBackend` (default sandbox)** — full OS-level isolation:
+- **Non-root** — runs as `65534:65534` (nobody)
+- **No capabilities** — `CapDrop=["ALL"]` + `no-new-privileges`
+- **Read-only root filesystem** — with a small writable `/tmp` tmpfs
+- **No network** — `NetworkDisabled`
+- **Resource limits** — memory, CPU, and `PidsLimit`
+- **seccomp** — Docker's default profile (or a custom one); optional gVisor (`runsc`) runtime
+
+**`SubprocessBackend` (trusted/dev-only — NOT a security boundary)** — defense-in-depth only:
+- **Allowlist imports / blocked builtins** — best-effort AST scan (has known bypasses)
+- **Stripped credentials** — API keys and cloud credentials removed from the environment
+- **Isolated interpreter** — `python -I` with a reduced builtins namespace
+- **Resource limits** — CPU/process/file-descriptor/file-size limits; process-group kill on timeout
+
+The pre-execution AST scan applies in both backends but is a filter, not a boundary — do
+not rely on it alone for untrusted output.
 
 ### Exceptions
 

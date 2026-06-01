@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 from pathlib import Path as PathLibPath
-from typing import Any
+from typing import Any, Literal
 
 import instructor
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
@@ -38,6 +38,14 @@ class ExtractorConfig(BaseModel):
     max_tokens: int = Field(default=8192, gt=0)
     max_codegen_retries: int = Field(default=3, ge=0)
     codegen_timeout: int = Field(default=60, gt=0)
+    codegen_sandbox: Literal["auto", "docker", "subprocess"] = Field(
+        default="auto",
+        description="Sandbox for executing untrusted, LLM-generated codegen scripts. "
+        "'auto' uses Docker when xlstruct[docker] is installed, else fails closed with a "
+        "clear error. 'docker' forces the Docker backend. 'subprocess' opts into the "
+        "non-isolating subprocess backend — NOT a security boundary; trusted/dev only. "
+        "An explicit execution_backend always overrides this.",
+    )
     thinking: bool = Field(
         default=False,
         description="Enable Anthropic extended thinking mode. "

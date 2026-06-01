@@ -224,6 +224,31 @@ class TestScanBlockedImports:
         assert scan_blocked_imports(code) == []
 
 
+# * Characterization: the AST scan is a best-effort filter, NOT a boundary (S1)
+
+
+class TestScanIsNotABoundary:
+    """Pin the known scanner bypasses that justify sandbox-by-default.
+
+    scan_blocked_imports only parses the AST — it never executes — so these
+    probes are harmless. They demonstrate why untrusted output needs Docker
+    isolation, not just the static scan. If the scanner is ever hardened to
+    catch one of these, update the corresponding assertion.
+    """
+
+    def test_alias_import_evades_sys_modules_pattern(self):
+        # ^ chain is 's.modules', not 'sys.modules', so the pattern misses it
+        assert scan_blocked_imports("import sys as s\nx = s.modules") == []
+
+    def test_globals_subscript_is_not_flagged(self):
+        # ^ globals() is not a blocked builtin; subscript access is not analyzed
+        assert scan_blocked_imports('g = globals()\nx = g["__bui" + "ltins__"]') == []
+
+    def test_getattr_with_concatenated_string_evades_detection(self):
+        # ^ 2nd arg is a BinOp, not an ast.Constant, so it slips past the check
+        assert scan_blocked_imports('cls = getattr((), "__cla" + "ss__")') == []
+
+
 # * _build_safe_env
 
 
@@ -450,7 +475,8 @@ class TestGetSchemaSource:
 
 class TestScriptValidatorValidate:
     async def test_disallowed_imports_returns_failure_without_execution(self):
-        validator = ScriptValidator(timeout=10)
+        # ^ backend is required now; the security scan rejects before it is ever called
+        validator = ScriptValidator(timeout=10, backend=AsyncMock())
         code = "import socket\nprint(socket.gethostname())"
         result = await validator.validate(code, source_path="/fake/path.xlsx")
         assert result.success is False

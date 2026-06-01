@@ -7,7 +7,6 @@ from typing import Any, cast
 from pydantic import BaseModel, ValidationError
 
 from xlstruct.codegen.backends.base import ExecutionBackend
-from xlstruct.codegen.backends.subprocess import SubprocessBackend
 from xlstruct.codegen.executor import scan_blocked_imports
 
 logger = logging.getLogger(__name__)
@@ -29,11 +28,13 @@ class ScriptValidator:
 
     def __init__(
         self,
+        backend: ExecutionBackend,
         timeout: int = 60,
-        backend: ExecutionBackend | None = None,
     ) -> None:
+        # ^ backend is required: no silent SubprocessBackend default — the caller
+        #   (orchestrator) resolves a sandboxed backend fail-closed.
         self._timeout = timeout
-        self._backend = backend or SubprocessBackend()
+        self._backend = backend
 
     async def validate(
         self,
@@ -68,8 +69,11 @@ class ScriptValidator:
                     "openpyxl, python-calamine, pydantic, json, sys, re, datetime, "
                     "decimal, math, typing, enum, collections, dataclasses, copy, "
                     "itertools, functools, csv, and similar standard data "
-                    "processing libraries. Dangerous builtins (exec, eval, open, "
-                    "getattr, globals, etc.) and dunder escape patterns are also blocked."
+                    "processing libraries. The builtins __import__, exec, eval, compile, "
+                    "open, and breakpoint are blocked, as are the dotted patterns "
+                    "sys.modules/sys.path/sys._getframe/sys.meta_path and dunder escape "
+                    "attributes (__subclasses__, __globals__, __builtins__, __bases__, "
+                    "__mro__, __code__). This scan is a best-effort filter, not a sandbox."
                 ),
             )
 

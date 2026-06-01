@@ -14,7 +14,7 @@ from typing import Any, cast
 from pydantic import BaseModel, ValidationError
 
 from xlstruct.codegen.backends.base import ExecutionBackend
-from xlstruct.codegen.backends.subprocess import SubprocessBackend
+from xlstruct.codegen.backends.resolver import resolve_execution_backend
 from xlstruct.codegen.engine import CodegenEngine
 from xlstruct.codegen.schema_utils import get_schema_source
 from xlstruct.codegen.validation import ScriptValidator
@@ -49,7 +49,18 @@ class CodegenOrchestrator:
     ) -> None:
         self._config = config
         self._engine = CodegenEngine(config, tracker=tracker)
-        self._backend: ExecutionBackend = backend or SubprocessBackend()
+        # ^ Resolve lazily at first script execution — header detection needs no
+        #   backend, so fail-closed only triggers when untrusted code actually runs.
+        self._explicit_backend = backend
+        self._resolved_backend: ExecutionBackend | None = None
+
+    def _get_backend(self) -> ExecutionBackend:
+        """Resolve (and memoize) the execution backend, fail-closed by default."""
+        if self._resolved_backend is None:
+            self._resolved_backend = resolve_execution_backend(
+                self._explicit_backend, self._config.codegen_sandbox
+            )
+        return self._resolved_backend
 
     # * Public API
 
@@ -205,7 +216,9 @@ class CodegenOrchestrator:
         output_schema: type[BaseModel],
     ) -> list[Any]:
         """Execute a validated script and parse JSON output into Pydantic models."""
-        validator = ScriptValidator(timeout=self._config.codegen_timeout, backend=self._backend)
+        validator = ScriptValidator(
+            timeout=self._config.codegen_timeout, backend=self._get_backend()
+        )
         validation = await validator.validate(
             script.code,
             source,
@@ -235,7 +248,9 @@ class CodegenOrchestrator:
         Uses conversation-based correction: error feedback is appended to the
         existing messages history instead of re-sending the entire original prompt.
         """
-        validator = ScriptValidator(timeout=self._config.codegen_timeout, backend=self._backend)
+        validator = ScriptValidator(
+            timeout=self._config.codegen_timeout, backend=self._get_backend()
+        )
         attempts: list[CodegenAttempt] = []
         current_code = result.code
         current_result = result

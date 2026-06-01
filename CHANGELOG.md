@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **OS-level sandbox is now the default for codegen execution (S1)** — untrusted, LLM-generated scripts run in `DockerBackend` when `xlstruct[docker]` is installed. The pre-execution AST scan is a best-effort filter, not a boundary (it has known bypasses), so it is no longer relied upon as the sole defense.
+- **Hardened `SubprocessBackend` and demoted it to trusted/dev-only (S1)** — runs the script via `python -I` with a reduced builtins namespace (no `eval`/`exec`/`compile`/`breakpoint`/`input`), adds `RLIMIT_CPU`/`RLIMIT_NPROC`/`RLIMIT_NOFILE`/`RLIMIT_FSIZE`, kills the whole process group on timeout with a bounded drain, and fails closed when limits cannot be applied. It is explicitly NOT a security boundary.
+- **Hardened `DockerBackend` (S2)** — the execution container now runs as a non-root user (`65534:65534`), drops all Linux capabilities (`CapDrop=["ALL"]`), mounts a read-only root filesystem with a writable `/tmp` tmpfs, and keeps `NetworkDisabled` + `no-new-privileges` + PID/memory/CPU limits. Optional `runtime` (e.g. gVisor `runsc`) and custom `seccomp_profile` knobs added to `DockerConfig`. The one-time package-install step stays permissive.
+- **Integrity-protected codegen script cache (S3)** — the cache directory is `0700`, entries are `0600`, and every cached script carries an HMAC keyed by a per-user secret. Entries that fail verification are refused (never executed) and regenerated. The structure signature was widened from 64-bit to the full 256-bit SHA-256 digest.
+
+### Added
+
+- **`ExtractorConfig.codegen_sandbox`** (`"auto"` | `"docker"` | `"subprocess"`, default `"auto"`) — selects the codegen execution sandbox. An explicit `execution_backend` always overrides it.
+- **`CodegenSecurityError`** + `ErrorCode.CODEGEN_NO_SANDBOX` — raised when codegen would run untrusted code with no sandbox available.
+- **`SubprocessBackend(trusted=...)`** — acknowledge trusted/dev-only use and silence the "not a security boundary" warning.
+
+### Changed (breaking)
+
+- **Codegen with the default config now requires a sandbox.** When `xlstruct[docker]` is not installed, codegen fails closed with `CodegenSecurityError` instead of silently executing in a non-isolating subprocess. To restore the previous (unsandboxed) behavior in a trusted environment, set `ExtractorConfig(codegen_sandbox="subprocess")` or pass `execution_backend=SubprocessBackend(trusted=True)`. Direct (non-codegen) extraction is unaffected.
+- **Existing codegen script caches are invalidated.** The widened structure signature changes cache keys, so cached scripts regenerate once on first use.
+- `ScriptValidator` now requires an explicit `backend` argument (no implicit subprocess default).
+
 ## [0.6.0] - 2026-04-03
 
 ### Added
