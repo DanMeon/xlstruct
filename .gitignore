@@ -31,8 +31,12 @@ scripts/
 # * Project instructions (not for public repo)
 CLAUDE.md
 
+# * Internal improvement plan (contains security PoC — never publish)
+docs/improvement-plan.md
+
 # * MAC OS
 .DS_Store
 
 # * MCP
-.serena/.claude/
+.serena/
+.claude/
