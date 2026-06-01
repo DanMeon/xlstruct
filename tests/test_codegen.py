@@ -4,6 +4,7 @@ import json
 import logging
 from unittest.mock import AsyncMock
 
+import pytest
 from pydantic import BaseModel
 
 from xlstruct.codegen.executor import (
@@ -12,8 +13,10 @@ from xlstruct.codegen.executor import (
     _build_safe_env,
     scan_blocked_imports,
 )
+from xlstruct.codegen.orchestrator import CodegenOrchestrator
 from xlstruct.codegen.schema_utils import get_schema_source
 from xlstruct.codegen.validation import ScriptValidator
+from xlstruct.exceptions import ErrorCode, ExtractionError
 from xlstruct.schemas.codegen import ColumnMapping, MappingPlan
 
 # * Test schemas
@@ -629,3 +632,56 @@ class TestMappingPlanValidation:
             "value",
             "note",
         ]
+
+
+# * C2 — codegen records that fail validation are surfaced, not silently dropped
+
+
+class TestValidateOutputAllRecords:
+    def test_validates_beyond_first_five_records(self):
+        # ^ 5 valid rows then a 6th with a type error — must NOT pass as "success"
+        data = [{"name": f"i{n}", "value": n} for n in range(5)]
+        data.append({"name": "bad", "value": "NOT_AN_INT"})
+        result = ScriptValidator._validate_output(json.dumps(data), SampleRecord)
+        assert "VALIDATION ERROR" in result
+        assert "Record 5" in result
+
+    def test_reports_total_failure_count_with_capped_detail(self):
+        data = [{"name": "x", "value": f"bad{n}"} for n in range(8)]
+        result = ScriptValidator._validate_output(json.dumps(data), SampleRecord)
+        assert "8/8 records" in result
+        assert "more failing records not shown" in result
+
+    def test_all_valid_returns_empty(self):
+        data = [{"name": f"i{n}", "value": n} for n in range(20)]
+        result = ScriptValidator._validate_output(json.dumps(data), SampleRecord)
+        assert result == ""
+
+
+class TestParseScriptOutput:
+    def test_valid_records_parsed(self):
+        stdout = json.dumps([{"name": "a", "value": 1}, {"name": "b", "value": 2}])
+        result = CodegenOrchestrator._parse_script_output(stdout, SampleRecord)
+        assert len(result) == 2
+
+    def test_invalid_record_raises_instead_of_dropping(self):
+        # ^ A record that fails validation must fail loudly, not vanish silently
+        stdout = json.dumps([{"name": "a", "value": 1}, {"name": "b", "value": "x"}])
+        with pytest.raises(ExtractionError) as exc:
+            CodegenOrchestrator._parse_script_output(stdout, SampleRecord)
+        assert exc.value.code == ErrorCode.EXTRACTION_SCHEMA_VALIDATION_FAILED
+
+    def test_provenance_source_row_stripped(self):
+        stdout = json.dumps([{"name": "a", "value": 1, "_source_row": 5}])
+        result = CodegenOrchestrator._parse_script_output(stdout, SampleRecord)
+        assert len(result) == 1
+        assert getattr(result[0], "_source_rows") == [5]
+
+
+class TestFilterLogsWarning:
+    def test_drop_emits_warning(self, caplog):
+        data = [{"name": "ok", "value": 1}, {"name": None, "value": 2}]
+        with caplog.at_level(logging.WARNING, logger="xlstruct.codegen.validation"):
+            ScriptValidator._filter_by_required_fields(json.dumps(data), SampleRecord)
+        assert any(rec.levelno == logging.WARNING for rec in caplog.records)
+        assert "dropped" in caplog.text.lower()

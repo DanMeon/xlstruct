@@ -150,11 +150,11 @@ class ScriptValidator:
         ]
 
         if len(filtered) < original_count:
-            logger.info(
-                "Post-filter: %d → %d records (removed %d with null required fields)",
-                original_count,
-                len(filtered),
+            # ^ WARNING (not INFO): dropping records is data loss the caller should see
+            logger.warning(
+                "Post-filter dropped %d/%d records with null required fields",
                 original_count - len(filtered),
+                original_count,
             )
 
         return json.dumps(filtered, ensure_ascii=False, indent=2, default=str)
@@ -163,12 +163,14 @@ class ScriptValidator:
     def _validate_output(
         stdout: str,
         schema: type[BaseModel],
-        max_sample: int = 5,
+        max_errors: int = 5,
         total_data_rows: int | None = None,
     ) -> str:
         """Validate stdout JSON against the Pydantic schema.
 
-        Parses stdout as JSON array and validates a sample of items.
+        Validates EVERY record (not a sample) so type errors beyond the first few
+        rows still fail the script and drive self-correction instead of being
+        silently dropped downstream. Reports up to ``max_errors`` failures.
         Returns empty string if valid, error description if invalid.
         """
         stdout_stripped = stdout.strip()
@@ -231,20 +233,23 @@ class ScriptValidator:
             )
             return msg
 
-        # * Validate a sample of items against the schema
+        # * Validate every record against the schema (no sampling)
         errors: list[str] = []
-        sample_indices = list(range(min(max_sample, len(data))))
-        for idx in sample_indices:
-            item = data[idx]
+        failed = 0
+        for idx, item in enumerate(data):
             try:
                 schema.model_validate(item)
             except ValidationError as e:
-                errors.append(f"Record {idx}: {e}")
+                failed += 1
+                if len(errors) < max_errors:
+                    errors.append(f"Record {idx}: {e}")
 
-        if errors:
+        if failed:
             error_detail = "\n".join(errors)
+            if failed > len(errors):
+                error_detail += f"\n(+{failed - len(errors)} more failing records not shown)"
             return (
-                f"OUTPUT VALIDATION ERROR: {len(errors)}/{len(sample_indices)} sampled records "
+                f"OUTPUT VALIDATION ERROR: {failed}/{len(data)} records "
                 f"failed schema validation ({schema.__name__}).\n{error_detail}"
             )
 

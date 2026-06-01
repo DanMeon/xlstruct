@@ -373,14 +373,28 @@ class CodegenOrchestrator:
         data = cast(list[dict[str, Any]], raw)
 
         results: list[BaseModel] = []
+        failures: list[str] = []
         for i, item in enumerate(data):
             # ^ Extract provenance before validation (not part of schema)
             source_row = item.pop("_source_row", None)
             try:
                 record = schema.model_validate(item)
-                if source_row is not None:
-                    object.__setattr__(record, "_source_rows", [source_row])
-                results.append(record)
             except ValidationError as e:
-                logger.warning("Record %d failed validation, skipping: %s", i, e)
+                failures.append(f"Record {i}: {e}")
+                continue
+            if source_row is not None:
+                object.__setattr__(record, "_source_rows", [source_row])
+            results.append(record)
+
+        # ^ The script already passed full-output validation; invalid records here are a
+        # ^ real inconsistency — fail loudly instead of silently dropping them.
+        if failures:
+            shown = "\n".join(failures[:5])
+            if len(failures) > 5:
+                shown += f"\n(+{len(failures) - 5} more)"
+            raise ExtractionError(
+                f"Codegen output failed schema validation: "
+                f"{len(failures)}/{len(data)} records invalid.\n{shown}",
+                code=ErrorCode.EXTRACTION_SCHEMA_VALIDATION_FAILED,
+            )
         return results

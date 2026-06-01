@@ -27,6 +27,7 @@ from xlstruct.config import (
     ExtractorConfig,
     apply_cache_control,
     build_instructor_client,
+    thinking_call_kwargs,
 )
 from xlstruct.encoder.compressed import CompressedEncoder
 from xlstruct.exceptions import ErrorCode, ExtractionError, ReaderError
@@ -428,6 +429,7 @@ class Extractor:
         from xlstruct.schemas.suggest import SuggestedFields
 
         client = build_instructor_client(self._config)
+        call_kwargs: dict[str, Any] = {"temperature": 0.0, **thinking_call_kwargs(self._config)}
 
         messages = apply_cache_control(
             [
@@ -439,7 +441,7 @@ class Extractor:
         result, completion = await client.create_with_completion(
             response_model=SuggestedFields,
             messages=messages,
-            temperature=0.0,
+            **call_kwargs,
         )
         if self._tracker:
             self._tracker.record("suggest_schema", completion)
@@ -864,6 +866,15 @@ class Extractor:
             code=ErrorCode.READER_UNSUPPORTED_FORMAT,
         )
 
+    @staticmethod
+    def _require_non_empty_sheet(sheet: SheetData) -> None:
+        """Fail fast on a 0-row sheet before spending an LLM header-detection call."""
+        if sheet.row_count == 0:
+            raise ReaderError(
+                f"Sheet '{sheet.name}' has no rows.",
+                code=ErrorCode.READER_PARSE_FAILED,
+            )
+
     async def _load_workbook(
         self,
         source: str,
@@ -880,7 +891,9 @@ class Extractor:
             from xlstruct.reader.csv_reader import CsvReader
 
             csv_reader = CsvReader()
-            workbook = await asyncio.to_thread(csv_reader.read, file_bytes, sheet_name)
+            workbook = await asyncio.to_thread(
+                csv_reader.read, file_bytes, sheet_name, encoding=self._config.csv_encoding
+            )
         else:
             reader = HybridReader()
             workbook = await asyncio.to_thread(
@@ -913,6 +926,7 @@ class Extractor:
         """
         workbook = await self._load_workbook(source, sheet_name=config.sheet, **storage_options)
         full_sheet = workbook.sheets[0]
+        self._require_non_empty_sheet(full_sheet)
         codegen = self._get_codegen()
 
         # * Auto-detect header rows if not provided
@@ -1010,10 +1024,18 @@ class Extractor:
                 min_chunk_rows=self._config.min_chunk_rows,
                 row_threshold=self._config.chunking_row_threshold,
             )
+            # * Parallel chunk extraction with bounded concurrency (rate-limit safe)
+            semaphore = asyncio.Semaphore(self._config.max_concurrent_chunks)
+
+            async def _extract_chunk(chunk: SheetData) -> list[T]:
+                async with semaphore:
+                    encoded = encoder.encode(chunk)
+                    return await target_engine.extract(encoded, schema, instructions)
+
+            # ^ gather preserves input order, so records stay in chunk order
+            chunk_results = await asyncio.gather(*[_extract_chunk(c) for c in chunks])
             all_results: list[T] = []
-            for chunk in chunks:
-                encoded = encoder.encode(chunk)
-                partial = await target_engine.extract(encoded, schema, instructions)
+            for partial in chunk_results:
                 all_results.extend(partial)
             return all_results
         else:
@@ -1036,6 +1058,7 @@ class Extractor:
         """
         workbook = await self._load_workbook(source, sheet_name=config.sheet, **storage_options)
         full_sheet = workbook.sheets[0]
+        self._require_non_empty_sheet(full_sheet)
 
         # * Auto-detect header rows if not provided (requires codegen orchestrator)
         header_rows = config.header_rows

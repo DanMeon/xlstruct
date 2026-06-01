@@ -70,6 +70,11 @@ class ExtractorConfig(BaseModel):
         description="Evaluate formula cells using the formulas library. "
         "Requires: pip install xlstruct[formulas]",
     )
+    csv_encoding: str = Field(
+        default="utf-8",
+        description="Text encoding for CSV files (e.g. 'euc-kr', 'cp1252', 'shift-jis'). "
+        "'utf-8' transparently strips a BOM if present. Ignored for Excel formats.",
+    )
     min_chunk_rows: int = Field(
         default=10,
         gt=0,
@@ -79,6 +84,14 @@ class ExtractorConfig(BaseModel):
         default=100,
         gt=0,
         description="Force chunking for sheets exceeding this row count.",
+    )
+    max_concurrent_chunks: int = Field(
+        default=5,
+        gt=0,
+        description="Max chunk LLM calls run concurrently for a single chunked sheet. "
+        "Bounds parallelism to respect provider rate limits. Multiplies with "
+        "extract_workbook(concurrency=...) on multi-sheet runs "
+        "(worst-case in-flight calls = concurrency × max_concurrent_chunks).",
     )
     provider_options: dict[str, Any] = Field(default_factory=dict)
     storage_options: dict[str, Any] = Field(default_factory=dict)
@@ -151,9 +164,11 @@ def is_anthropic(provider: str) -> bool:
 
 
 def apply_cache_control(messages: list[dict[str, Any]], provider: str) -> list[dict[str, Any]]:
-    """Apply Anthropic prompt caching markers to messages.
+    """Apply the Anthropic prompt-caching marker to the static system prompt only.
 
-    Wraps system and first user message content with cache_control ephemeral markers.
+    The system prompt is stable across calls, so caching it reliably hits. The user
+    message holds variable sheet data — it changes every call, would essentially never
+    hit, and tagging it only burns a cache breakpoint. So it is left unmarked.
     Returns messages unchanged for non-Anthropic providers.
     """
     if not is_anthropic(provider):
@@ -164,8 +179,8 @@ def apply_cache_control(messages: list[dict[str, Any]], provider: str) -> list[d
         role = msg["role"]
         content = msg["content"]
 
-        # ^ Apply cache_control to system prompt and first user message
-        if role in ("system", "user") and isinstance(content, str):
+        # ^ Cache only the stable system prompt, not the variable user message
+        if role == "system" and isinstance(content, str):
             result.append(
                 {
                     "role": role,
@@ -205,11 +220,28 @@ def get_provider_kwargs(config: ExtractorConfig) -> dict[str, Any]:
     return defaults
 
 
-def build_instructor_client(config: "ExtractorConfig") -> Any:
-    """Create async Instructor client with provider-specific kwargs.
+def _use_anthropic_thinking(config: "ExtractorConfig") -> bool:
+    """Whether extended thinking applies — Anthropic-only, requires 'anthropic/<model>'."""
+    return config.thinking and config.provider.startswith("anthropic/")
 
-    Centralizes the common pattern: get_provider_kwargs → inject api_key → from_provider.
+
+def build_instructor_client(config: "ExtractorConfig") -> Any:
+    """Create async Instructor client honoring extended thinking.
+
+    For Anthropic + thinking, uses ANTHROPIC_REASONING_TOOLS mode (the model is supplied
+    per-call via thinking_call_kwargs). Otherwise uses the standard provider client.
     """
+    if _use_anthropic_thinking(config):
+        from anthropic import AsyncAnthropic  # type: ignore
+
+        client_kwargs: dict[str, Any] = {}
+        if config.api_key:
+            client_kwargs["api_key"] = config.api_key.get_secret_value()
+        return instructor.from_anthropic(  # type: ignore
+            AsyncAnthropic(**client_kwargs),  # type: ignore
+            mode=instructor.Mode.ANTHROPIC_REASONING_TOOLS,
+        )
+
     kwargs = get_provider_kwargs(config)
     if config.api_key:
         kwargs["api_key"] = config.api_key.get_secret_value()
@@ -218,3 +250,21 @@ def build_instructor_client(config: "ExtractorConfig") -> Any:
         async_client=True,
         **kwargs,
     )
+
+
+def thinking_call_kwargs(config: "ExtractorConfig") -> dict[str, Any]:
+    """Per-call create_with_completion() kwargs for extended thinking.
+
+    Empty when thinking is off. For Anthropic + thinking, forces temperature=1
+    (Anthropic requirement), enables the thinking block, and carries max_tokens + model
+    (from_anthropic does not embed the model the way from_provider does). Callers merge
+    this last so it overrides any caller-supplied temperature.
+    """
+    if not _use_anthropic_thinking(config):
+        return {}
+    return {
+        "temperature": 1,
+        "thinking": {"type": "enabled", "budget_tokens": 10_000},
+        "max_tokens": 16_000,
+        "model": config.provider.split("/", 1)[1],
+    }

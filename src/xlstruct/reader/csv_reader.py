@@ -12,6 +12,7 @@ import logging
 
 from openpyxl.utils import get_column_letter
 
+from xlstruct.exceptions import ErrorCode, ReaderError
 from xlstruct.schemas.core import CellData, SheetData, WorkbookData
 
 log = logging.getLogger(__name__)
@@ -60,7 +61,15 @@ class CsvReader:
         """
         # ^ utf-8-sig strips BOM if present; identical to utf-8 otherwise
         effective_encoding = "utf-8-sig" if encoding == "utf-8" else encoding
-        text = file_bytes.decode(effective_encoding)
+        try:
+            text = file_bytes.decode(effective_encoding)
+        except (UnicodeDecodeError, LookupError) as e:
+            # ^ UnicodeDecodeError: wrong encoding; LookupError: unknown encoding name
+            raise ReaderError(
+                f"Failed to decode CSV as '{encoding}': {e}. "
+                "Set the correct encoding via ExtractorConfig(csv_encoding=...).",
+                code=ErrorCode.READER_PARSE_FAILED,
+            ) from e
 
         # * Dialect auto-detection
         dialect = self._detect_dialect(text)

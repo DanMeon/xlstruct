@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from xlstruct.config import ExtractorConfig, get_provider_kwargs
+from xlstruct.config import ExtractorConfig, apply_cache_control, get_provider_kwargs
 
 
 class TestExtractorConfig:
@@ -73,3 +73,28 @@ class TestGetProviderKwargs:
         )
         kwargs = get_provider_kwargs(config)
         assert kwargs["max_tokens"] == 4096
+
+
+class TestApplyCacheControl:
+    def test_marks_system_only_for_anthropic(self):
+        messages = [
+            {"role": "system", "content": "STATIC SYSTEM PROMPT"},
+            {"role": "user", "content": "VARIABLE SHEET DATA"},
+        ]
+        result = apply_cache_control(messages, "anthropic/claude-sonnet-4-6")
+
+        # ^ system prompt is wrapped with a cache_control marker
+        sys_content = result[0]["content"]
+        assert isinstance(sys_content, list)
+        assert sys_content[0]["cache_control"] == {"type": "ephemeral"}
+
+        # ^ variable user message is left as a plain string (no cache breakpoint)
+        assert result[1]["content"] == "VARIABLE SHEET DATA"
+
+    def test_non_anthropic_returns_messages_unchanged(self):
+        messages = [
+            {"role": "system", "content": "SYS"},
+            {"role": "user", "content": "DATA"},
+        ]
+        result = apply_cache_control(messages, "openai/gpt-4o")
+        assert result == messages

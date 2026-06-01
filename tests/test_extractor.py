@@ -1,5 +1,6 @@
 """Integration tests for Extractor class with mocked LLM extraction."""
 
+import asyncio
 import io
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,8 +8,10 @@ import openpyxl
 import pytest
 from pydantic import BaseModel
 
-from xlstruct.config import ExtractionMode, ExtractorConfig
+from xlstruct.config import ExtractionConfig, ExtractionMode, ExtractorConfig
+from xlstruct.exceptions import ErrorCode, ReaderError
 from xlstruct.extractor import ExtractionResult, Extractor
+from xlstruct.schemas.core import SheetData, WorkbookData
 from xlstruct.schemas.report import ExtractionReport
 from xlstruct.schemas.usage import TokenUsage
 
@@ -295,3 +298,120 @@ class TestExtractorLoadWorkbook:
 
         workbook = await extractor._load_workbook(product_xlsx_file)
         assert len(workbook.sheets) == 1
+
+
+# * P1 — chunked single-sheet extraction runs concurrently (bounded), order preserved
+
+
+@pytest.fixture
+def large_xlsx_file(tmp_path) -> str:
+    """Xlsx with enough rows (> 100) to trigger chunking."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Products"
+    ws["A1"], ws["B1"], ws["C1"] = "Name", "Price", "Stock"
+    for i in range(2, 153):  # ^ 151 data rows
+        ws[f"A{i}"], ws[f"B{i}"], ws[f"C{i}"] = f"Product{i}", float(i), i * 10
+    buf = io.BytesIO()
+    wb.save(buf)
+    path = tmp_path / "large.xlsx"
+    path.write_bytes(buf.getvalue())
+    return str(path)
+
+
+class TestChunkedConcurrency:
+    async def test_chunks_run_concurrently_and_bounded(self, large_xlsx_file):
+        # ^ concurrency=2 + multiple chunks → peak in-flight is exactly 2
+        extractor = Extractor(max_concurrent_chunks=2)
+        active = 0
+        peak = 0
+
+        async def mock_extract(encoded, schema, instructions=None):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.02)  # ^ hold the slot so peers can enter
+            active -= 1
+            return [Product(name="x", price=1.0, stock=1)]
+
+        with patch.object(extractor._engine, "extract", side_effect=mock_extract):
+            await extractor.extract(large_xlsx_file, Product)
+
+        assert peak == 2  # > 1 proves parallel; == 2 proves the semaphore bound holds
+
+    async def test_chunked_order_preserved_despite_reverse_completion(self):
+        extractor = Extractor(max_concurrent_chunks=5)
+        chunks = [SheetData(name=f"c{i}", row_count=1) for i in range(4)]
+
+        async def mock_extract(encoded, schema, instructions=None):
+            idx = int(encoded)
+            # ^ later chunks finish first; gather must still restore input order
+            await asyncio.sleep(0.01 * (4 - idx))
+            return [Product(name=f"Chunk{idx}", price=float(idx), stock=idx)]
+
+        with (
+            patch("xlstruct.extractor.needs_chunking", return_value=True),
+            patch.object(extractor._chunk_splitter, "split", return_value=chunks),
+            patch(
+                "xlstruct.extractor.CompressedEncoder.encode",
+                side_effect=lambda chunk: chunk.name[1:],
+            ),
+            patch.object(extractor._engine, "extract", side_effect=mock_extract),
+        ):
+            results = await extractor._run_sheet_extraction(
+                chunks[0], Product, engine=extractor._engine
+            )
+
+        assert [r.name for r in results] == ["Chunk0", "Chunk1", "Chunk2", "Chunk3"]
+
+
+# * B3 — empty sheet fast-fails before the header-detection LLM call
+
+
+class TestEmptySheetFastFail:
+    @staticmethod
+    def _empty_workbook() -> WorkbookData:
+        return WorkbookData(sheets=[SheetData(name="Empty", row_count=0, col_count=0)])
+
+    async def test_empty_sheet_raises_reader_error(self):
+        extractor = Extractor()
+        config = ExtractionConfig(output_schema=Product, mode=ExtractionMode.DIRECT)
+        with patch.object(
+            extractor, "_load_workbook", new_callable=AsyncMock, return_value=self._empty_workbook()
+        ):
+            with pytest.raises(ReaderError) as exc:
+                await extractor.extract("x.xlsx", extraction_config=config)
+        assert exc.value.code == ErrorCode.READER_PARSE_FAILED
+
+    async def test_empty_sheet_raises_in_streaming(self):
+        extractor = Extractor()
+        config = ExtractionConfig(output_schema=Product, mode=ExtractionMode.DIRECT)
+        with patch.object(
+            extractor, "_load_workbook", new_callable=AsyncMock, return_value=self._empty_workbook()
+        ):
+            with pytest.raises(ReaderError):
+                async for _ in extractor.stream("x.xlsx", extraction_config=config):
+                    pass
+
+
+# * C3 — csv_encoding is threaded from config through _load_workbook to the CSV reader
+
+
+class TestCsvEncodingThreading:
+    @staticmethod
+    def _euckr_csv(tmp_path) -> str:
+        path = tmp_path / "k.csv"
+        path.write_bytes("이름,값\n사과,10\n".encode("euc-kr"))
+        return str(path)
+
+    async def test_default_utf8_raises_reader_error_on_euckr(self, tmp_path):
+        extractor = Extractor()
+        with pytest.raises(ReaderError) as exc:
+            await extractor._load_workbook(self._euckr_csv(tmp_path))
+        assert exc.value.code == ErrorCode.READER_PARSE_FAILED
+
+    async def test_config_encoding_parses_euckr(self, tmp_path):
+        extractor = Extractor(csv_encoding="euc-kr")
+        workbook = await extractor._load_workbook(self._euckr_csv(tmp_path))
+        values = [c.value for c in workbook.sheets[0].cells]
+        assert "이름" in values
