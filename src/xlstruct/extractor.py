@@ -32,8 +32,11 @@ from xlstruct.config import (
 from xlstruct.encoder.compressed import CompressedEncoder
 from xlstruct.exceptions import ErrorCode, ExtractionError, ReaderError
 from xlstruct.extraction.chunking import ChunkSplitter, needs_chunking
+from xlstruct.extraction.concurrency import run_concurrent
 from xlstruct.extraction.engine import ExtractionEngine
-from xlstruct.reader.hybrid_reader import HybridReader
+from xlstruct.extraction.report import build_extraction_report
+from xlstruct.reader.base import ReaderOptions
+from xlstruct.reader.dispatch import get_source_ext, read_workbook
 from xlstruct.schemas.batch import BatchResult, FileResult
 from xlstruct.schemas.codegen import GeneratedScript
 from xlstruct.schemas.core import SheetData, WorkbookData
@@ -222,38 +225,10 @@ class Extractor:
         else:
             raise ValueError("Either schema or extraction_config must be provided")
 
-        # * Collect provenance from records (set by ExtractionEngine._split_provenance)
-        source_rows: list[list[int]] = [getattr(item, "_source_rows", []) for item in items]
-        source_cells: list[dict[str, str]] = [getattr(item, "_source_cells", {}) for item in items]
-        # ^ Only include if any provenance was actually tracked
-        if not any(source_rows):
-            source_rows = []
-        if not any(source_cells):
-            source_cells = []
-
-        # * Collect confidence from records (set by ExtractionEngine.extract)
-        field_confidences: dict[str, list[float]] | None = None
-        if items and hasattr(items[0], "_field_confidences"):
-            all_fields: set[str] = set()
-            for item in items:
-                per_record = getattr(item, "_field_confidences", {})
-                all_fields.update(per_record.keys())
-            field_confidences = {name: [] for name in sorted(all_fields)}
-            for item in items:
-                per_record = getattr(item, "_field_confidences", {})
-                for name in field_confidences:
-                    field_confidences[name].append(per_record.get(name, 0.5))
-
         usage = self._tracker.snapshot()
         logger.info(usage)
 
-        report = ExtractionReport(
-            mode=resolved_mode,
-            usage=usage,
-            source_rows=source_rows,
-            source_cells=source_cells,
-            field_confidences=field_confidences,
-        )
+        report = build_extraction_report(items, resolved_mode, usage)
         return ExtractionResult(items, report=report)
 
     async def generate_script(
@@ -545,82 +520,43 @@ class Extractor:
         # ^ Load all sheets at once (sheet_name=None)
         workbook = await self._load_workbook(source, sheet_name=None, **storage_options)
 
-        semaphore = asyncio.Semaphore(concurrency)
-        total = len(sheet_schemas)
-        completed_count = 0
-        count_lock = asyncio.Lock()
-
-        async def _extract_sheet(
-            sheet_name: str, schema: type[BaseModel]
-        ) -> tuple[str, SheetResult[Any]]:
-            nonlocal completed_count
-
-            if on_progress:
-                on_progress(
-                    ProgressEvent(
-                        source=sheet_name,
-                        status=ProgressStatus.STARTED,
-                        completed=completed_count,
-                        total=total,
-                    )
+        async def _worker(
+            pair: tuple[str, type[BaseModel]],
+        ) -> tuple[tuple[str, SheetResult[Any]], ProgressStatus, str | None]:
+            sheet_name, schema = pair
+            sheet_data = workbook.get_sheet(sheet_name)
+            if sheet_data is None:
+                error_msg = f"Sheet '{sheet_name}' not found. Available: {workbook.sheet_names}"
+                result: SheetResult[Any] = SheetResult(
+                    sheet_name=sheet_name, success=False, error=error_msg
                 )
+                return (sheet_name, result), ProgressStatus.FAILED, error_msg
 
-            async with semaphore:
-                sheet_data = workbook.get_sheet(sheet_name)
-                if sheet_data is None:
-                    error_msg = f"Sheet '{sheet_name}' not found. Available: {workbook.sheet_names}"
-                    sheet_result: SheetResult[Any] = SheetResult(
-                        sheet_name=sheet_name,
-                        success=False,
-                        error=error_msg,
-                    )
-                    status = ProgressStatus.FAILED
-                else:
-                    try:
-                        tracker = UsageTracker()
-                        engine = ExtractionEngine(self._config, tracker=tracker)
-                        items = await self._run_sheet_extraction(
-                            sheet_data, schema, instructions, engine=engine
-                        )
-                        sheet_result = SheetResult(
-                            sheet_name=sheet_name,
-                            success=True,
-                            records=items,
-                            usage=tracker.snapshot(),
-                        )
-                        status = ProgressStatus.COMPLETED
-                        error_msg = None
-                    except Exception as e:
-                        logger.warning(
-                            "Workbook extraction failed for sheet '%s': %s", sheet_name, e
-                        )
-                        error_msg = f"{type(e).__name__}: {e}"
-                        sheet_result = SheetResult(
-                            sheet_name=sheet_name,
-                            success=False,
-                            error=error_msg,
-                        )
-                        status = ProgressStatus.FAILED
-
-            async with count_lock:
-                completed_count += 1
-                current_completed = completed_count
-
-            if on_progress:
-                on_progress(
-                    ProgressEvent(
-                        source=sheet_name,
-                        status=status,
-                        completed=current_completed,
-                        total=total,
-                        error=error_msg,
-                    )
+            try:
+                tracker = UsageTracker()
+                engine = ExtractionEngine(self._config, tracker=tracker)
+                items = await self._run_sheet_extraction(
+                    sheet_data, schema, instructions, engine=engine
                 )
+                result = SheetResult(
+                    sheet_name=sheet_name,
+                    success=True,
+                    records=items,
+                    usage=tracker.snapshot(),
+                )
+                return (sheet_name, result), ProgressStatus.COMPLETED, None
+            except Exception as e:
+                logger.warning("Workbook extraction failed for sheet '%s': %s", sheet_name, e)
+                error_msg = f"{type(e).__name__}: {e}"
+                result = SheetResult(sheet_name=sheet_name, success=False, error=error_msg)
+                return (sheet_name, result), ProgressStatus.FAILED, error_msg
 
-            return sheet_name, sheet_result
-
-        pairs = await asyncio.gather(
-            *[_extract_sheet(name, schema) for name, schema in sheet_schemas.items()]
+        pairs = await run_concurrent(
+            list(sheet_schemas.items()),
+            _worker,
+            concurrency=concurrency,
+            label=lambda pair: pair[0],
+            on_progress=on_progress,
         )
         return WorkbookResult(results=dict(pairs))
 
@@ -775,70 +711,40 @@ class Extractor:
         Returns:
             BatchResult with per-file results and aggregated usage.
         """
-        semaphore = asyncio.Semaphore(concurrency)
-        total = len(sources)
-        completed_count = 0
-        count_lock = asyncio.Lock()
 
-        async def _process_one(source: str) -> FileResult[T]:
-            nonlocal completed_count
-
-            if on_progress:
-                on_progress(
-                    ProgressEvent(
-                        source=source,
-                        status=ProgressStatus.STARTED,
-                        completed=completed_count,
-                        total=total,
-                    )
+        async def _worker(source: str) -> tuple[FileResult[T], ProgressStatus, str | None]:
+            try:
+                result = await self.extract(
+                    source,
+                    schema,
+                    extraction_config=extraction_config,
+                    sheet=sheet,
+                    instructions=instructions,
+                    **storage_options,
+                )
+                file_result = FileResult(
+                    source=source,
+                    success=True,
+                    records=list(result),
+                    usage=result.report.usage,
+                )
+                return file_result, ProgressStatus.COMPLETED, None
+            except Exception as e:
+                logger.warning("Batch extraction failed for %s: %s", source, e)
+                error_msg = f"{type(e).__name__}: {e}"
+                return (
+                    FileResult[T](source=source, success=False, error=error_msg),
+                    ProgressStatus.FAILED,
+                    error_msg,
                 )
 
-            async with semaphore:
-                try:
-                    result = await self.extract(
-                        source,
-                        schema,
-                        extraction_config=extraction_config,
-                        sheet=sheet,
-                        instructions=instructions,
-                        **storage_options,
-                    )
-                    file_result = FileResult(
-                        source=source,
-                        success=True,
-                        records=list(result),
-                        usage=result.report.usage,
-                    )
-                    status = ProgressStatus.COMPLETED
-                    error_msg = None
-                except Exception as e:
-                    logger.warning("Batch extraction failed for %s: %s", source, e)
-                    error_msg = f"{type(e).__name__}: {e}"
-                    file_result = FileResult[T](
-                        source=source,
-                        success=False,
-                        error=error_msg,
-                    )
-                    status = ProgressStatus.FAILED
-
-            async with count_lock:
-                completed_count += 1
-                current_completed = completed_count
-
-            if on_progress:
-                on_progress(
-                    ProgressEvent(
-                        source=source,
-                        status=status,
-                        completed=current_completed,
-                        total=total,
-                        error=error_msg,
-                    )
-                )
-
-            return file_result
-
-        file_results = await asyncio.gather(*[_process_one(s) for s in sources])
+        file_results = await run_concurrent(
+            sources,
+            _worker,
+            concurrency=concurrency,
+            label=lambda source: source,
+            on_progress=on_progress,
+        )
         return BatchResult(results=list(file_results))
 
     def extract_batch_sync(
@@ -857,14 +763,7 @@ class Extractor:
     @staticmethod
     def _get_source_ext(source: str) -> str:
         """Extract and validate file extension from source path/URL."""
-        lower = source.lower().rsplit("?", 1)[0]  # ^ Strip query params for URLs
-        for ext in (".xlsm", ".xltx", ".xltm", ".xlsx", ".xls", ".csv"):
-            if lower.endswith(ext):
-                return ext
-        raise ReaderError(
-            f"Unsupported file format: {source}",
-            code=ErrorCode.READER_UNSUPPORTED_FORMAT,
-        )
+        return get_source_ext(source)
 
     @staticmethod
     def _require_non_empty_sheet(sheet: SheetData) -> None:
@@ -885,29 +784,37 @@ class Extractor:
         merged_options = {**self._config.storage_options, **storage_options}
         file_bytes = await read_file(source, **merged_options)
 
-        ext = self._get_source_ext(source)
-
-        if ext == ".csv":
-            from xlstruct.reader.csv_reader import CsvReader
-
-            csv_reader = CsvReader()
-            workbook = await asyncio.to_thread(
-                csv_reader.read, file_bytes, sheet_name, encoding=self._config.csv_encoding
-            )
-        else:
-            reader = HybridReader()
-            workbook = await asyncio.to_thread(
-                reader.read,
-                file_bytes,
-                sheet_name,
-                source_ext=ext,
-                strict_formulas=self._config.strict_formulas,
-                evaluate_formulas=self._config.evaluate_formulas,
-            )
+        options = ReaderOptions(
+            strict_formulas=self._config.strict_formulas,
+            evaluate_formulas=self._config.evaluate_formulas,
+            csv_encoding=self._config.csv_encoding,
+        )
+        workbook = await asyncio.to_thread(
+            read_workbook, file_bytes, source, sheet_name, options=options
+        )
 
         workbook.file_name = source.rsplit("/", 1)[-1]
         workbook.file_size = len(file_bytes)
         return workbook
+
+    @staticmethod
+    def _resolve_auto_mode(
+        full_sheet: SheetData,
+        header_rows: list[int],
+        requested_mode: ExtractionMode,
+        *,
+        log_label: str = "Auto-routing",
+    ) -> ExtractionMode:
+        """Resolve AUTO to DIRECT/CODEGEN by data-row count; pass other modes through.
+
+        Routing: data rows ≤ SAMPLE_ROWS → DIRECT, > SAMPLE_ROWS → CODEGEN.
+        """
+        if requested_mode != ExtractionMode.AUTO:
+            return requested_mode
+        data_rows = full_sheet.row_count - max(header_rows)
+        mode = ExtractionMode.CODEGEN if data_rows > SAMPLE_ROWS else ExtractionMode.DIRECT
+        logger.info("%s: %d data rows → mode=%s", log_label, data_rows, mode.value)
+        return mode
 
     async def _run_configured_extraction(
         self,
@@ -934,20 +841,7 @@ class Extractor:
         if header_rows is None:
             header_rows = await codegen.detect_header_rows(full_sheet)
 
-        # * Resolve mode
-        mode = config.mode
-        if mode == ExtractionMode.AUTO:
-            max_header_row = max(header_rows)
-            data_rows = full_sheet.row_count - max_header_row
-            if data_rows > SAMPLE_ROWS:
-                mode = ExtractionMode.CODEGEN
-            else:
-                mode = ExtractionMode.DIRECT
-            logger.info(
-                "Auto-routing: %d data rows → mode=%s",
-                data_rows,
-                mode.value,
-            )
+        mode = self._resolve_auto_mode(full_sheet, header_rows, config.mode)
 
         if mode == ExtractionMode.CODEGEN:
             items = await self._run_codegen(source, full_sheet, header_rows, config, codegen)
@@ -1066,20 +960,9 @@ class Extractor:
             codegen = self._get_codegen()
             header_rows = await codegen.detect_header_rows(full_sheet)
 
-        # * Resolve mode
-        mode = config.mode
-        if mode == ExtractionMode.AUTO:
-            max_header_row = max(header_rows)
-            data_rows = full_sheet.row_count - max_header_row
-            if data_rows > SAMPLE_ROWS:
-                mode = ExtractionMode.CODEGEN
-            else:
-                mode = ExtractionMode.DIRECT
-            logger.info(
-                "Auto-routing (stream): %d data rows → mode=%s",
-                data_rows,
-                mode.value,
-            )
+        mode = self._resolve_auto_mode(
+            full_sheet, header_rows, config.mode, log_label="Auto-routing (stream)"
+        )
 
         if mode == ExtractionMode.CODEGEN:
             codegen = self._get_codegen()
