@@ -211,8 +211,10 @@ class TestStreamConfigured:
 
         extractor = Extractor()
         with (
-            patch.object(extractor, "_get_codegen", return_value=MagicMock()),
-            patch.object(extractor, "_run_codegen", new_callable=AsyncMock) as mock_codegen,
+            patch.object(extractor._pipeline, "_get_codegen", return_value=MagicMock()),
+            patch.object(
+                extractor._pipeline, "_run_codegen", new_callable=AsyncMock
+            ) as mock_codegen,
         ):
             mock_codegen.return_value = expected
             results = [

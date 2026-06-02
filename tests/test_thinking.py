@@ -102,7 +102,9 @@ class TestSuggestSchemaThinking:
         with (
             # ^ Engine built in Extractor.__init__ must not hit a real client
             patch("xlstruct.extraction.engine.build_instructor_client", return_value=MagicMock()),
-            patch("xlstruct.extractor.build_instructor_client", return_value=suggest_client),
+            patch(
+                "xlstruct.extraction.pipeline.build_instructor_client", return_value=suggest_client
+            ),
         ):
             extractor = Extractor(provider="anthropic/claude-sonnet-4-6", thinking=True)
             await extractor.suggest_schema(str(path))

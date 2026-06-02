@@ -350,10 +350,10 @@ class TestChunkedConcurrency:
             return [Product(name=f"Chunk{idx}", price=float(idx), stock=idx)]
 
         with (
-            patch("xlstruct.extractor.needs_chunking", return_value=True),
+            patch("xlstruct.extraction.pipeline.needs_chunking", return_value=True),
             patch.object(extractor._chunk_splitter, "split", return_value=chunks),
             patch(
-                "xlstruct.extractor.CompressedEncoder.encode",
+                "xlstruct.extraction.pipeline.CompressedEncoder.encode",
                 side_effect=lambda chunk: chunk.name[1:],
             ),
             patch.object(extractor._engine, "extract", side_effect=mock_extract),
@@ -377,7 +377,10 @@ class TestEmptySheetFastFail:
         extractor = Extractor()
         config = ExtractionConfig(output_schema=Product, mode=ExtractionMode.DIRECT)
         with patch.object(
-            extractor, "_load_workbook", new_callable=AsyncMock, return_value=self._empty_workbook()
+            extractor._pipeline,
+            "load_workbook",
+            new_callable=AsyncMock,
+            return_value=self._empty_workbook(),
         ):
             with pytest.raises(ReaderError) as exc:
                 await extractor.extract("x.xlsx", extraction_config=config)
@@ -387,7 +390,10 @@ class TestEmptySheetFastFail:
         extractor = Extractor()
         config = ExtractionConfig(output_schema=Product, mode=ExtractionMode.DIRECT)
         with patch.object(
-            extractor, "_load_workbook", new_callable=AsyncMock, return_value=self._empty_workbook()
+            extractor._pipeline,
+            "load_workbook",
+            new_callable=AsyncMock,
+            return_value=self._empty_workbook(),
         ):
             with pytest.raises(ReaderError):
                 async for _ in extractor.stream("x.xlsx", extraction_config=config):
@@ -396,7 +402,10 @@ class TestEmptySheetFastFail:
     async def test_empty_sheet_raises_in_legacy_schema_path(self):
         extractor = Extractor()
         with patch.object(
-            extractor, "_load_workbook", new_callable=AsyncMock, return_value=self._empty_workbook()
+            extractor._pipeline,
+            "load_workbook",
+            new_callable=AsyncMock,
+            return_value=self._empty_workbook(),
         ):
             with pytest.raises(ReaderError) as exc:
                 await extractor.extract("x.xlsx", Product)
