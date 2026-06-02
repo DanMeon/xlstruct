@@ -1,5 +1,7 @@
 """XLStruct — LLM-powered Excel parser."""
 
+__version__ = "0.7.0"
+
 from xlstruct.config import ExtractionConfig, ExtractionMode, ExtractorConfig
 from xlstruct.exceptions import (
     CodegenSecurityError,
@@ -16,6 +18,7 @@ from xlstruct.schemas.progress import ProgressEvent, ProgressStatus
 from xlstruct.schemas.usage import TokenUsage
 
 __all__ = [
+    "__version__",
     "Extractor",
     "ExtractionResult",
     "ExtractorConfig",

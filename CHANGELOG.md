@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-06-02
 
 ### Security
 
@@ -19,12 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ExtractorConfig.codegen_sandbox`** (`"auto"` | `"docker"` | `"subprocess"`, default `"auto"`) — selects the codegen execution sandbox. An explicit `execution_backend` always overrides it.
 - **`CodegenSecurityError`** + `ErrorCode.CODEGEN_NO_SANDBOX` — raised when codegen would run untrusted code with no sandbox available.
 - **`SubprocessBackend(trusted=...)`** — acknowledge trusted/dev-only use and silence the "not a security boundary" warning.
+- **`ExtractorConfig.csv_encoding`** — text encoding for CSV files (e.g. `euc-kr`, `cp1252`, `shift-jis`); `utf-8` strips a BOM if present. Ignored for Excel formats.
+- **`ExtractorConfig.max_concurrent_chunks`** (default `5`) — bounds how many chunk LLM calls run concurrently for a single chunked sheet, to respect provider rate limits.
+- **`xlstruct.__version__`** — the package version is now exposed in code, mirroring `pyproject.toml`.
+
+### Changed
+
+- **Extended thinking now applies to direct extraction and `suggest_schema`** (C1) — previously honored only on the codegen path. LLM client construction is unified so `thinking=True` reaches every call.
+- **Chunked single-sheet extraction runs concurrently** (P1) — independent chunks are dispatched together under a bounded semaphore instead of serially, cutting wall-clock latency on large sheets.
+- **Anthropic prompt caching marks only the static system prompt** (P2) — the variable per-call sheet data is no longer tagged, so a cache breakpoint is not wasted on content that never repeats.
+- **Chunk sizing uses measured per-row token cost** (P4) — `ChunkSplitter` greedy bin-packs rows by real cost (reserving the header) so every chunk fits `token_budget` regardless of where heavy rows sit; the previous sampled, header-blind estimate could over-budget chunks.
+- **Internal: `Extractor` decomposed into a thin facade over `ExtractionPipeline`** (A1, A2, A3) — orchestration, report assembly, and concurrency moved into `extraction/`; reader dispatch centralized into `READER_REGISTRY` shared by the extractor and MCP server; the unused `ExcelReader` protocol replaced by `WorkbookReader` + `ReaderOptions`. Public API and behavior unchanged.
 
 ### Changed (breaking)
 
 - **Codegen with the default config now requires a sandbox.** When `xlstruct[docker]` is not installed, codegen fails closed with `CodegenSecurityError` instead of silently executing in a non-isolating subprocess. To restore the previous (unsandboxed) behavior in a trusted environment, set `ExtractorConfig(codegen_sandbox="subprocess")` or pass `execution_backend=SubprocessBackend(trusted=True)`. Direct (non-codegen) extraction is unaffected.
 - **Existing codegen script caches are invalidated.** The widened structure signature changes cache keys, so cached scripts regenerate once on first use.
 - `ScriptValidator` now requires an explicit `backend` argument (no implicit subprocess default).
+
+### Fixed
+
+- **Codegen no longer silently drops invalid records** (C2) — records that fail schema validation now raise instead of being skipped, so a partially mis-extracted result is surfaced rather than returned truncated.
+- **Non-UTF-8 CSV files raise `ReaderError`** (C3) — a decode failure is wrapped with guidance and honors the configurable `csv_encoding`, instead of an unhandled `UnicodeDecodeError`.
+- **Extraction error handling no longer mislabels internal bugs** (C4) — only the provider call is wrapped, so a post-processing bug is not reported as an LLM failure.
+- **Empty (0-row) sheets fail fast** (B3) — both the configured and legacy `extract()` paths raise before spending an LLM call.
+- **Confidence scoring no longer silently defaults** (B2) — a missing confidence level surfaces as an error instead of a fabricated `moderate` (0.5).
+- **`find_empty_rows` no longer allocates a full row-range set** (B1) — wide/tall sheets skip the `set(range(...))` allocation; row-skipping behavior is unchanged.
+- **Token counting tolerates special-token literals** — cell content like `<|endoftext|>` no longer raises during token estimation (now uses `encode_ordinary`).
 
 ## [0.6.0] - 2026-04-03
 
