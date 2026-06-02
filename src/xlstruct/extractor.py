@@ -218,6 +218,7 @@ class Extractor:
         elif schema is not None:
             workbook = await self._load_workbook(source, sheet_name=sheet, **storage_options)
             target_sheet = workbook.sheets[0]
+            self._require_non_empty_sheet(target_sheet)
             items = await self._run_sheet_extraction(
                 target_sheet, schema, instructions, engine=self._engine
             )

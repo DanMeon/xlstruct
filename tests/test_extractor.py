@@ -393,6 +393,15 @@ class TestEmptySheetFastFail:
                 async for _ in extractor.stream("x.xlsx", extraction_config=config):
                     pass
 
+    async def test_empty_sheet_raises_in_legacy_schema_path(self):
+        extractor = Extractor()
+        with patch.object(
+            extractor, "_load_workbook", new_callable=AsyncMock, return_value=self._empty_workbook()
+        ):
+            with pytest.raises(ReaderError) as exc:
+                await extractor.extract("x.xlsx", Product)
+        assert exc.value.code == ErrorCode.READER_PARSE_FAILED
+
 
 # * C3 — csv_encoding is threaded from config through _load_workbook to the CSV reader
 

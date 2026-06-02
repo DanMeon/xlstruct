@@ -7,8 +7,8 @@ class ExecutionBackend(Protocol):
     """Protocol for script execution backends.
 
     Implementations:
-    - SubprocessBackend: Hardened subprocess (default).
-    - DockerBackend: Full OS-level isolation via Docker.
+    - SubprocessBackend: Hardened subprocess (trusted/dev-only — not a security boundary).
+    - DockerBackend: Full OS-level isolation via Docker (the default for untrusted codegen).
     """
 
     async def execute(
