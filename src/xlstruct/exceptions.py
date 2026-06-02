@@ -26,6 +26,7 @@ class ErrorCode(StrEnum):
     CODEGEN_MAX_RETRIES = "CODEGEN_MAX_RETRIES"
     CODEGEN_SYNTAX_ERROR = "CODEGEN_SYNTAX_ERROR"
     CODEGEN_EXECUTION_FAILED = "CODEGEN_EXECUTION_FAILED"
+    CODEGEN_NO_SANDBOX = "CODEGEN_NO_SANDBOX"
 
 
 class XLStructError(Exception):
@@ -54,3 +55,12 @@ class CodegenValidationError(XLStructError):
     def __init__(self, message: str, attempts: "list[Any]", code: ErrorCode | None = None) -> None:
         super().__init__(message, code=code)
         self.attempts = attempts
+
+
+class CodegenSecurityError(XLStructError):
+    """No OS-level sandbox is available to execute untrusted codegen output.
+
+    Raised (fail-closed) instead of silently running LLM-generated code in the
+    non-isolating subprocess backend. Resolve by installing Docker support or by
+    explicitly opting into the trusted/dev-only subprocess backend.
+    """

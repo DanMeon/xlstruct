@@ -16,6 +16,9 @@ DOCKER_PIP_PACKAGES = ("openpyxl", "python-calamine")
 # ^ Suffix appended to base image name for the prepared image
 _PREPARED_IMAGE_TAG = "xlstruct-ready"
 
+# ^ Default UID:GID for the execution container (nobody:nogroup)
+_DEFAULT_NONROOT_USER = "65534:65534"
+
 
 class DockerConfig(BaseModel):
     """Docker backend configuration for codegen execution."""
@@ -40,6 +43,34 @@ class DockerConfig(BaseModel):
         default=True,
         description="Pull the Docker image if not found locally.",
     )
+    # * Hardening — applied to the execution container, never to the one-time install step.
+    user: str = Field(
+        default=_DEFAULT_NONROOT_USER,
+        description="UID:GID for the execution container. Defaults to nobody. "
+        "Empty string uses the image default (root) — not recommended.",
+    )
+    read_only_rootfs: bool = Field(
+        default=True,
+        description="Mount the container root filesystem read-only (a /tmp tmpfs stays writable).",
+    )
+    cap_drop: list[str] = Field(
+        default_factory=lambda: ["ALL"],
+        description="Linux capabilities to drop in the execution container.",
+    )
+    tmpfs_size: str = Field(
+        default="64m",
+        description="Size of the writable /tmp tmpfs mounted when the rootfs is read-only.",
+    )
+    runtime: str | None = Field(
+        default=None,
+        description="Container runtime for the execution step, e.g. 'runsc' for gVisor. "
+        "None uses Docker's default runtime.",
+    )
+    seccomp_profile: PathLibPath | None = Field(
+        default=None,
+        description="Path to a custom seccomp JSON profile applied to the execution "
+        "container. None keeps Docker's built-in default seccomp profile active.",
+    )
 
 
 class _HostConfig(BaseModel):
@@ -53,9 +84,21 @@ class _HostConfig(BaseModel):
     CpuPeriod: int = Field(default=100_000, description="CPU CFS period in microseconds")
     PidsLimit: int = Field(default=64, description="Max number of PIDs in the container")
     ReadonlyRootfs: bool = Field(default=False, description="Mount root filesystem as read-only")
+    CapDrop: list[str] = Field(
+        default_factory=list,
+        description="Linux capabilities to drop (e.g. ['ALL'])",
+    )
+    Tmpfs: dict[str, str] = Field(
+        default_factory=dict,
+        description="Writable tmpfs mounts (path -> mount options)",
+    )
     SecurityOpt: list[str] = Field(
         default_factory=lambda: ["no-new-privileges"],
-        description="Security options (e.g. no-new-privileges)",
+        description="Security options (e.g. no-new-privileges, seccomp=...)",
+    )
+    Runtime: str | None = Field(
+        default=None,
+        description="Container runtime (e.g. 'runsc' for gVisor); None = Docker default",
     )
 
 
@@ -69,19 +112,25 @@ class _ContainerConfig(BaseModel):
         description="Working directory inside the container",
     )
     NetworkDisabled: bool = Field(default=True, description="Disable network access for isolation")
+    User: str = Field(default="", description="UID:GID to run as; empty = image default (root)")
+    Env: list[str] = Field(default_factory=list, description="Environment as KEY=VALUE strings")
     HostConfig: _HostConfig = Field(description="Host-level resource constraints")
 
 
 class DockerBackend:
     """Execute scripts in an isolated Docker container via aiodocker.
 
-    Provides full OS-level sandboxing: no host filesystem access, no network,
-    restricted memory/CPU. Requires Docker daemon and the ``aiodocker`` package
+    Provides full OS-level sandboxing for untrusted codegen output: no host
+    filesystem access, no network, a non-root user, all capabilities dropped, a
+    read-only root filesystem (with a small writable ``/tmp`` tmpfs), restricted
+    memory/CPU/PIDs, no-new-privileges, and Docker's seccomp profile (or a custom
+    one). Requires the Docker daemon and the ``aiodocker`` package
     (install with ``pip install xlstruct[docker]``).
     """
 
     def __init__(self, config: DockerConfig | None = None) -> None:
         cfg = config or DockerConfig()
+        self._cfg = cfg
         self._image = cfg.image
         self._mem_limit = cfg.mem_limit
         self._cpu_quota = cfg.cpu_quota
@@ -94,6 +143,36 @@ class DockerBackend:
         """Tag name for the prepared image with pre-installed packages."""
         # ^ e.g. "python:3.11-slim" → "python:3.11-slim-xlstruct-ready"
         return f"{self._image}-{_PREPARED_IMAGE_TAG}"
+
+    def _install_host_config(self) -> _HostConfig:
+        """Permissive host config for the one-time package install (needs root + writes)."""
+        mem = _parse_mem_limit(self._mem_limit)
+        return _HostConfig(Memory=mem, MemorySwap=mem, CpuQuota=self._cpu_quota)
+
+    def _exec_host_config(self) -> _HostConfig:
+        """Hardened host config for running untrusted scripts."""
+        mem = _parse_mem_limit(self._mem_limit)
+        security_opt = ["no-new-privileges"]
+        if self._cfg.seccomp_profile is not None:
+            # ^ aiodocker passes profiles inline as JSON content, not a path.
+            profile = self._cfg.seccomp_profile.read_text(encoding="utf-8")
+            security_opt.append(f"seccomp={profile}")
+
+        tmpfs: dict[str, str] = {}
+        if self._cfg.read_only_rootfs:
+            # ^ Scripts only print to stdout; a small writable /tmp covers any scratch.
+            tmpfs["/tmp"] = f"rw,nosuid,nodev,noexec,size={self._cfg.tmpfs_size},mode=1777"
+
+        return _HostConfig(
+            Memory=mem,
+            MemorySwap=mem,
+            CpuQuota=self._cpu_quota,
+            ReadonlyRootfs=self._cfg.read_only_rootfs,
+            CapDrop=list(self._cfg.cap_drop),
+            Tmpfs=tmpfs,
+            SecurityOpt=security_opt,
+            Runtime=self._cfg.runtime,
+        )
 
     async def _ensure_image(self) -> None:
         """Prepare a Docker image with dependencies pre-installed.
@@ -133,7 +212,7 @@ class DockerBackend:
                 logger.info("Pulling base image: %s", self._image)
                 await docker.pull(self._image)
 
-            # * Stage 1: Install packages with network enabled → commit
+            # * Stage 1: Install packages with network enabled → commit (permissive: needs root)
             logger.info("Preparing image: installing %s", ", ".join(DOCKER_PIP_PACKAGES))
             install_config = _ContainerConfig(
                 Image=self._image,
@@ -144,15 +223,11 @@ class DockerBackend:
                     *DOCKER_PIP_PACKAGES,
                 ],
                 NetworkDisabled=False,
-                HostConfig=_HostConfig(
-                    Memory=_parse_mem_limit(self._mem_limit),
-                    MemorySwap=_parse_mem_limit(self._mem_limit),
-                    CpuQuota=self._cpu_quota,
-                ),
+                HostConfig=self._install_host_config(),
             )
 
             container = await docker.containers.create(
-                config=install_config.model_dump(),
+                config=install_config.model_dump(exclude_none=True),
             )
 
             try:
@@ -184,7 +259,8 @@ class DockerBackend:
     ) -> tuple[int, str, str]:
         """Execute code in a Docker container with full isolation.
 
-        Uses the prepared image (packages pre-installed) with network disabled.
+        Uses the prepared image (packages pre-installed) with network disabled,
+        a non-root user, dropped capabilities, and a read-only root filesystem.
         """
         try:
             import aiodocker
@@ -201,7 +277,7 @@ class DockerBackend:
         if not source.exists():
             return 1, "", f"Source file not found: {source_path}"
 
-        # * Stage 2: Run script with network disabled
+        # * Stage 2: Run script under the hardened, network-disabled config
         async with aiodocker.Docker() as docker:
             container_config = _ContainerConfig(
                 Image=self._ready_image,
@@ -211,19 +287,19 @@ class DockerBackend:
                     f"/workspace/{source.name}",
                 ],
                 NetworkDisabled=self._network_disabled,
-                HostConfig=_HostConfig(
-                    Memory=_parse_mem_limit(self._mem_limit),
-                    MemorySwap=_parse_mem_limit(self._mem_limit),
-                    CpuQuota=self._cpu_quota,
-                ),
+                User=self._cfg.user,
+                # ^ Avoid .pyc writes against the read-only rootfs; flush stdout promptly.
+                Env=["PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"],
+                HostConfig=self._exec_host_config(),
             )
 
             container = await docker.containers.create(
-                config=container_config.model_dump(),
+                config=container_config.model_dump(exclude_none=True),
             )
 
             try:
-                # * Copy files into container via tar archive
+                # * Copy files into container via tar archive (before start: lands in the
+                #   writable layer, then stays readable once the rootfs is mounted read-only)
                 tar_bytes = _build_tar_archive(
                     ("script.py", code.encode("utf-8")),
                     (source.name, source.read_bytes()),

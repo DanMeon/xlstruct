@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, create_model
 from xlstruct.codegen.cache import ScriptCache
 from xlstruct.config import ExtractionConfig, ExtractionMode
 from xlstruct.extractor import ExtractionResult, Extractor
-from xlstruct.reader.hybrid_reader import HybridReader
+from xlstruct.reader.dispatch import read_workbook
 from xlstruct.schemas.batch import BatchResult
 from xlstruct.schemas.core import SheetData
 from xlstruct.storage import read_file
@@ -156,17 +156,7 @@ def _validate_source(source: str) -> None:
 async def _load_sheet(source: str, sheet: str | None = None) -> SheetData:
     """Load a single sheet from a file for inspection."""
     file_bytes = await read_file(source)
-    ext = Extractor._get_source_ext(source)  # pyright: ignore[reportPrivateUsage]
-
-    if ext == ".csv":
-        from xlstruct.reader.csv_reader import CsvReader
-
-        csv_reader = CsvReader()
-        workbook = await asyncio.to_thread(csv_reader.read, file_bytes, sheet)
-    else:
-        reader = HybridReader()
-        workbook = await asyncio.to_thread(reader.read, file_bytes, sheet, source_ext=ext)
-
+    workbook = await asyncio.to_thread(read_workbook, file_bytes, source, sheet)
     return workbook.sheets[0]
 
 

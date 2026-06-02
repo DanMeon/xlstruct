@@ -10,7 +10,7 @@ from xlstruct.encoder._formatting import (
     build_column_headers,
     build_multi_row_headers,
     detect_header_row,
-    find_empty_rows,
+    find_non_empty_rows,
     format_cell_value,
     format_merged_regions,
     summarize_column_types,
@@ -72,9 +72,9 @@ class CompressedEncoder:
             parts.append(", ".join(type_parts))
 
         # * Build markdown table (full or sampled)
-        empty_rows = find_empty_rows(sheet)
+        non_empty_rows = find_non_empty_rows(sheet)
         table_text, total_data_rows, shown_data_rows = self._build_table(
-            sheet, headers, data_start, empty_rows
+            sheet, headers, data_start, non_empty_rows
         )
 
         parts.append("")
@@ -92,7 +92,7 @@ class CompressedEncoder:
         sheet: SheetData,
         headers: dict[int, str],
         data_start: int,
-        empty_rows: set[int],
+        non_empty_rows: set[int],
     ) -> tuple[str, int, int]:
         """Build markdown table, optionally sampling rows.
 
@@ -118,7 +118,7 @@ class CompressedEncoder:
             row_num = row_cells[0].row
             if row_num < data_start:
                 continue
-            if row_num in empty_rows:
+            if row_num not in non_empty_rows:
                 continue
 
             row_values: dict[int, str] = {}

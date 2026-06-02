@@ -4,7 +4,12 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, Field, create_model
 
-from xlstruct.config import ExtractorConfig, apply_cache_control, build_instructor_client
+from xlstruct.config import (
+    ExtractorConfig,
+    apply_cache_control,
+    build_instructor_client,
+    thinking_call_kwargs,
+)
 from xlstruct.exceptions import ErrorCode, ExtractionError
 from xlstruct.prompts.extraction import build_extraction_prompt
 from xlstruct.prompts.system import SYSTEM_PROMPT
@@ -93,8 +98,9 @@ def _split_confidence(
         # ^ Extract and convert confidence scores
         for name in field_names:
             conf_key = f"{name}_confidence"
-            level = data.pop(conf_key, "moderate")
-            field_confidences[name].append(CONFIDENCE_SCORES.get(level, 0.5))
+            # ^ Required by the confidence wrapper schema — a missing key means a structural bug
+            level = data.pop(conf_key)
+            field_confidences[name].append(CONFIDENCE_SCORES[level])
 
         record = original_schema.model_validate(data)
         cleaned.append(record)
@@ -109,6 +115,7 @@ class ExtractionEngine:
         self._config = config
         self._tracker = tracker
         self._client = build_instructor_client(config)
+        self._thinking_kwargs = thinking_call_kwargs(config)
 
     async def extract(
         self,
@@ -149,49 +156,57 @@ class ExtractionEngine:
                 response_schema, exclude_fields=provenance_fields
             )
 
+        # ^ Message prep is our code — keep it outside the LLM try/except below
+        messages = apply_cache_control(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            self._config.provider,
+        )
+        call_kwargs: dict[str, Any] = {
+            "temperature": self._config.temperature,
+            **self._thinking_kwargs,
+        }
+
+        # * Only the provider call is wrapped — our post-processing keeps its own exception type
         try:
-            messages = apply_cache_control(
-                [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                self._config.provider,
-            )
             result, completion = await self._client.create_with_completion(
                 response_model=list[response_schema],  # type: ignore
                 messages=messages,
                 max_retries=self._config.max_retries,
-                temperature=self._config.temperature,
+                **call_kwargs,
             )
-            if self._tracker:
-                self._tracker.record("extraction", completion)
-
-            items = list(result)
-
-            # ^ Split confidence first (outermost wrapper), then provenance
-            field_confidences: dict[str, list[float]] | None = None
-            if include_confidence:
-                # ^ The schema to split against includes provenance fields if both are enabled
-                split_schema = _build_provenance_schema(schema) if track_provenance else schema
-                items, field_confidences = _split_confidence(items, split_schema)
-
-            if track_provenance:
-                items = self._split_provenance(items, schema)
-
-            # ^ Attach confidence data to each record for collection by Extractor
-            if field_confidences is not None:
-                for i, item in enumerate(items):
-                    per_record: dict[str, float] = {}
-                    for field_name, scores in field_confidences.items():
-                        if i < len(scores):
-                            per_record[field_name] = scores[i]
-                    object.__setattr__(item, "_field_confidences", per_record)
-
-            return items  # type: ignore
         except Exception as e:
             raise ExtractionError(
                 f"LLM extraction failed: {e}", code=ErrorCode.EXTRACTION_LLM_FAILED
             ) from e
+
+        if self._tracker:
+            self._tracker.record("extraction", completion)
+
+        items = list(result)
+
+        # ^ Split confidence first (outermost wrapper), then provenance
+        field_confidences: dict[str, list[float]] | None = None
+        if include_confidence:
+            # ^ The schema to split against includes provenance fields if both are enabled
+            split_schema = _build_provenance_schema(schema) if track_provenance else schema
+            items, field_confidences = _split_confidence(items, split_schema)
+
+        if track_provenance:
+            items = self._split_provenance(items, schema)
+
+        # ^ Attach confidence data to each record for collection by Extractor
+        if field_confidences is not None:
+            for i, item in enumerate(items):
+                per_record: dict[str, float] = {}
+                for field_name, scores in field_confidences.items():
+                    if i < len(scores):
+                        per_record[field_name] = scores[i]
+                object.__setattr__(item, "_field_confidences", per_record)
+
+        return items  # type: ignore
 
     @staticmethod
     def _split_provenance(items: list[BaseModel], original_schema: type[T]) -> list[T]:

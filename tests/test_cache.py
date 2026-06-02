@@ -1,6 +1,9 @@
 """Tests for codegen script caching."""
 
 import json
+import os
+import stat
+import sys
 
 import pytest
 from pydantic import BaseModel
@@ -8,6 +11,7 @@ from pydantic import BaseModel
 from xlstruct.codegen.cache import (
     CacheMetadata,
     ScriptCache,
+    _compute_mac,
     compute_structure_signature,
 )
 from xlstruct.schemas.codegen import GeneratedScript
@@ -72,9 +76,9 @@ class TestComputeStructureSignature:
         assert sig1 == sig2
 
     def test_length(self, sample_sheet):
-        """Signature is 16-char hex string."""
+        """Signature is the full 64-char (256-bit) SHA-256 hex digest."""
         sig = compute_structure_signature(sample_sheet, [1], Invoice)
-        assert len(sig) == 16
+        assert len(sig) == 64
         assert all(c in "0123456789abcdef" for c in sig)
 
     def test_different_schema_different_signature(self, sample_sheet):
@@ -229,3 +233,107 @@ class TestScriptCache:
 
         result = cache.get(sig)
         assert result is None
+
+
+# * Integrity protection (S3)
+
+
+class TestCacheIntegrity:
+    def test_valid_entry_round_trips(self, cache, sample_sheet, sample_script):
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+        got = cache.get(sig)
+        assert got is not None
+        assert got.code == sample_script.code
+
+    def test_tampered_script_is_refused(self, cache, sample_sheet, sample_script):
+        """A modified cached script must NOT be returned (never executed)."""
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+
+        # ^ Inject code at the predicted path (harmless probe; refused before any run)
+        script_path = cache.cache_dir / f"{sig}.py"
+        script_path.write_text("import os\nos.system('exit 0')  # injected", encoding="utf-8")
+
+        assert cache.get(sig) is None
+
+    def test_legacy_entry_without_mac_is_refused(self, cache, sample_sheet, sample_script):
+        """An entry with no MAC (pre-integrity cache) is refused and regenerated."""
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+
+        meta_path = cache.cache_dir / f"{sig}.json"
+        meta = json.loads(meta_path.read_text())
+        meta["mac"] = ""
+        meta_path.write_text(json.dumps(meta))
+
+        assert cache.get(sig) is None
+
+    def test_mac_from_different_secret_is_refused(self, cache, sample_sheet, sample_script):
+        """A MAC forged under a different key must not verify."""
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+
+        meta_path = cache.cache_dir / f"{sig}.json"
+        meta = json.loads(meta_path.read_text())
+        meta["mac"] = _compute_mac(b"attacker-key", sig, sample_script.code)
+        meta_path.write_text(json.dumps(meta))
+
+        assert cache.get(sig) is None
+
+    def test_mac_binds_signature_blocking_cross_entry_reuse(
+        self, cache, sample_sheet, sample_script
+    ):
+        """A validly-signed entry cannot be relocated to a different signature path."""
+        sig_a = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig_a, sample_script, sample_sheet, [1], Invoice)
+
+        sig_b = "b" * 64
+        # ^ Copy A's code + A's (valid) mac into B's paths
+        (cache.cache_dir / f"{sig_b}.py").write_text(sample_script.code, encoding="utf-8")
+        meta = json.loads((cache.cache_dir / f"{sig_a}.json").read_text())
+        (cache.cache_dir / f"{sig_b}.json").write_text(json.dumps(meta))
+
+        # ^ MAC was computed over sig_a, so it fails to verify under sig_b
+        assert cache.get(sig_b) is None
+
+    def test_non_ascii_mac_is_refused_not_crash(self, cache, sample_sheet, sample_script):
+        """A hostile non-ASCII mac must degrade to skip+regenerate, not crash extraction."""
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+
+        meta_path = cache.cache_dir / f"{sig}.json"
+        meta = json.loads(meta_path.read_text())
+        meta["mac"] = "café" * 16  # ^ non-ASCII would raise in hmac.compare_digest
+        meta_path.write_text(json.dumps(meta))
+
+        assert cache.get(sig) is None  # ^ returns cleanly (no TypeError)
+
+    def test_malformed_mac_is_refused(self, cache, sample_sheet, sample_script):
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+
+        meta_path = cache.cache_dir / f"{sig}.json"
+        meta = json.loads(meta_path.read_text())
+        meta["mac"] = "deadbeef"  # ^ valid hex but wrong length
+        meta_path.write_text(json.dumps(meta))
+
+        assert cache.get(sig) is None
+
+    def test_clear_preserves_secret(self, cache, sample_sheet, sample_script):
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+        secret_path = cache.cache_dir / ".hmac_key"
+        assert secret_path.exists()
+        cache.clear()
+        assert secret_path.exists()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+    def test_private_permissions(self, cache, sample_sheet, sample_script):
+        sig = compute_structure_signature(sample_sheet, [1], Invoice)
+        cache.put(sig, sample_script, sample_sheet, [1], Invoice)
+
+        assert stat.S_IMODE(os.stat(cache.cache_dir).st_mode) == 0o700
+        assert stat.S_IMODE(os.stat(cache.cache_dir / f"{sig}.py").st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(cache.cache_dir / f"{sig}.json").st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(cache.cache_dir / ".hmac_key").st_mode) == 0o600

@@ -3,6 +3,9 @@
 import csv
 from unittest.mock import patch
 
+import pytest
+
+from xlstruct.exceptions import ErrorCode, ReaderError
 from xlstruct.reader.csv_reader import CsvReader
 
 reader = CsvReader()
@@ -178,3 +181,28 @@ def test_non_date_string_remains_string() -> None:
 
     assert values[(2, 2)] == "2024-hello"
     assert types[(2, 2)] == "s"
+
+
+# * C3 — non-UTF8 decode failure is wrapped as ReaderError; encoding is honored
+
+
+class TestCsvEncoding:
+    EUCKR = "이름,값\n사과,10\n".encode("euc-kr")
+
+    def test_non_utf8_raises_reader_error(self):
+        # ^ euc-kr bytes are invalid utf-8 — must surface as ReaderError, not raw UnicodeDecodeError
+        with pytest.raises(ReaderError) as exc:
+            reader.read(self.EUCKR)
+        assert exc.value.code == ErrorCode.READER_PARSE_FAILED
+
+    def test_explicit_encoding_parses(self):
+        wb = reader.read(self.EUCKR, encoding="euc-kr")
+        values = [c.value for c in wb.sheets[0].cells]
+        assert "이름" in values
+        assert "사과" in values
+
+    def test_unknown_encoding_name_raises_reader_error(self):
+        # ^ bogus encoding name raises LookupError — must also surface as ReaderError
+        with pytest.raises(ReaderError) as exc:
+            reader.read(b"a,b\n1,2\n", encoding="nonsense")
+        assert exc.value.code == ErrorCode.READER_PARSE_FAILED
